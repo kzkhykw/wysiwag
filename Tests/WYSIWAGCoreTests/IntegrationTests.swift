@@ -25,8 +25,9 @@ extension CoreTests {
     }
     @Test func validNotionContinuationSendsAllRemainingText() async throws {
         let prefix = String(repeating: "a", count: 2_000), remaining = String(repeating: "日", count: 2_001)
-        let page = UUID().uuidString
+        let page = UUID().uuidString, requests = RequestCount()
         let writer = NotionWriter(http: MockProtocol.client { request in
+            _ = requests.increment()
             #expect(request.httpMethod == "PATCH" && request.url?.path == "/v1/blocks/\(page)/children")
             let body = try JSONSerialization.jsonObject(with: MockProtocol.body(request)) as! [String: Any]
             let children = body["children"] as! [[String: Any]]
@@ -41,6 +42,7 @@ extension CoreTests {
         var job = CloudJob(row: CaptureRow(screen: sample(prefix + remaining), previousWrittenAt: nil), destination: .notion, settings: AppSettings())
         job.pageID = page; job.nextBlock = 1
         #expect(try await writer.deliver(job) == nil)
+        #expect(requests.value == 1)
     }
     @Test func notionUnicodeChunkingAndBatching() throws {
         let text = String(repeating: "日本語🙂\n", count: 40_001)

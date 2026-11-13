@@ -31,20 +31,31 @@ public actor CSVWriter {
             let journals = outbox ?? folder.appendingPathComponent(".wysiwag-journal")
             let url = folder.appendingPathComponent("wysiwag-\(row.day).csv")
             try CSVTransaction.withCSV(url) { fd in
+                var hasUnknownJournal = false
                 for pending in try CSVTransaction.pending(in: journals) {
-                    let transaction: CSVTransaction?
-                    do { transaction = try CSVTransaction.read(pending, forCSV: url) }
+                    let routing: CSVTransaction.Routing
+                    do { routing = try CSVTransaction.read(pending, forCSV: url) }
                     catch { if !FileManager.default.fileExists(atPath: pending.path) { continue }; throw error }
-                    if let transaction { try transaction.finish(at: pending, fd: fd) }
+                    switch routing {
+                    case .unrelated: continue
+                    case .unknown: hasUnknownJournal = true
+                    case .matching(let transaction): try transaction.finish(at: pending, fd: fd)
+                    }
                 }
                 let size = lseek(fd, 0, SEEK_END)
                 let checkpoint = url.appendingPathExtension("offset")
-                let committed: Int64
+                let checkpointOffset: Int64?
                 if let data = try? Data(contentsOf: checkpoint), let offset = try? JSONDecoder().decode(Int64.self, from: data), offset >= 0, offset <= size {
-                    committed = offset
+                    checkpointOffset = offset
+                } else { checkpointOffset = nil }
+                let committed: Int64
+                if let checkpointOffset, !hasUnknownJournal {
+                    committed = checkpointOffset
                 } else {
-                    // Import/recover a legacy file once, respecting quoted multiline records.
-                    committed = try Self.completePrefix(Data(contentsOf: url))
+                    // An opaque journal may own a complete row written after this checkpoint.
+                    // Preserve every complete record; only an incomplete tail may be removed.
+                    let complete = try Self.completePrefix(Data(contentsOf: url))
+                    committed = max(checkpointOffset ?? 0, complete)
                 }
                 guard ftruncate(fd, committed) == 0 else { throw SafeFailure.localWrite }
                 try DurableFile.sync(fd)

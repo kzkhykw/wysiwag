@@ -156,6 +156,50 @@ extension CoreTests {
 }
 
 extension CoreTests {
+    @Test func restartWithOpaqueJournalPreservesCompleteRowBeyondStaleCheckpoint() async throws {
+        for incompleteTail in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let folder = root.appendingPathComponent("csv"), outbox = root.appendingPathComponent("outbox")
+            var settings = AppSettings(); settings.notionEnabled = true; settings.googleEnabled = true
+            let a = CaptureRow(screen: sample("A"), previousWrittenAt: nil)
+            try await CSVWriter(folder: folder).append(a, outbox: outbox)
+            let file = folder.appendingPathComponent("wysiwag-\(a.day).csv")
+            let checkpoint = file.appendingPathExtension("offset")
+            let staleOffset = try Data(contentsOf: checkpoint)
+            let b = CaptureRow(screen: sample("B, \"quoted\"\n日本語\nlast line", date: a.screen.timestamp.addingTimeInterval(5)), previousWrittenAt: a.screen.timestamp)
+            let bJobs = RetryQueue.jobs(row: b, settings: settings)
+            let id = UUID(), journal = outbox.appendingPathComponent(id.uuidString + ".txn")
+            let opaque = Data("{opaque interrupted journal".utf8)
+            let batch = journal.deletingPathExtension().appendingPathExtension("json")
+            let batchBytes = try JSONEncoder().encode(OutboxBatch(jobs: bJobs))
+            try DurableFile.replace(opaque, at: journal)
+            try DurableFile.replace(batchBytes, at: batch)
+            // Simulate restart after B reached CSV, but before the A checkpoint advanced.
+            let handle = try FileHandle(forWritingTo: file)
+            try handle.seekToEnd(); try handle.write(contentsOf: Data(CSV.encode(b).utf8))
+            if incompleteTail { try handle.write(contentsOf: Data("2026,App,Title,\"partial\nquoted tail".utf8)) }
+            try handle.close()
+            #expect(try Data(contentsOf: checkpoint) == staleOffset)
+            let c = CaptureRow(screen: sample("C", date: b.screen.timestamp.addingTimeInterval(5)), previousWrittenAt: b.screen.timestamp)
+            let restarted = CSVWriter(folder: folder)
+            let cJobs = RetryQueue.jobs(row: c, settings: settings)
+            try await restarted.append(c, jobs: cJobs, outbox: outbox)
+            let expected = CSV.header + CSV.encode(a) + CSV.encode(b) + CSV.encode(c)
+            #expect(try String(contentsOf: file, encoding: .utf8) == expected)
+            #expect(try JSONDecoder().decode(Int64.self, from: Data(contentsOf: checkpoint)) == Int64(expected.utf8.count))
+            let probe = DeliveryProbe(), queue = RetryQueue(folder: outbox, notion: probe, sheets: probe)
+            try await queue.retryBlocked(); try await queue.drain(settings: settings)
+            #expect(Set(await probe.received) == Set(cJobs.map(\.id)))
+            #expect(try Data(contentsOf: journal) == opaque)
+            #expect(try Data(contentsOf: batch) == batchBytes)
+            #expect(try await queue.status().recovering == 1)
+            // A further restart must preserve B too; the bad intent remains gated.
+            let d = CaptureRow(screen: sample("D", date: c.screen.timestamp.addingTimeInterval(5)), previousWrittenAt: c.screen.timestamp)
+            try await CSVWriter(folder: folder).append(d, outbox: outbox)
+            #expect(try String(contentsOf: file, encoding: .utf8) == expected + CSV.encode(d))
+        }
+    }
     @Test func malformedJournalDoesNotBlockCapturesToAnotherDayOrFolder() async throws {
         for anotherFolder in [false, true] {
             for opaque in [false, true] {

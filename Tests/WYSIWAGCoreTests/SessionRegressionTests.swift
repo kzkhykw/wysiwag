@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import WYSIWAGCore
 
-private final class RequestCount: @unchecked Sendable {
+final class RequestCount: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
     func increment() -> Int { lock.withLock { count += 1; return count } }

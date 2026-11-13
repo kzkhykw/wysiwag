@@ -67,15 +67,20 @@ struct CSVTransaction: Codable {
             .filter { $0.pathExtension == "txn" }.sorted { $0.path < $1.path }
     }
     static func read(_ url: URL) throws -> Self { try JSONDecoder().decode(Self.self, from: Data(contentsOf: url)) }
-    static func read(_ url: URL, forCSV csvURL: URL) throws -> Self? {
-        // Route before decoding the transaction. Unrouteable journals remain retained and
-        // keep their batches gated; they cannot prevent recording to independent CSVs.
+    enum Routing {
+        case unrelated
+        case unknown
+        case matching(CSVTransaction)
+    }
+    static func read(_ url: URL, forCSV csvURL: URL) throws -> Routing {
+        // Unknown ownership is distinct from an unrelated target: the caller must preserve
+        // complete CSV records beyond a potentially stale checkpoint in that case.
         struct Target: Decodable { let csvURL: URL }
         guard let data = try? Data(contentsOf: url),
-              let target = try? JSONDecoder().decode(Target.self, from: data),
-              target.csvURL.standardizedFileURL == csvURL.standardizedFileURL else { return nil }
+              let target = try? JSONDecoder().decode(Target.self, from: data) else { return .unknown }
+        guard target.csvURL.standardizedFileURL == csvURL.standardizedFileURL else { return .unrelated }
         // A damaged transaction known to belong to this CSV still stops its append.
-        return try JSONDecoder().decode(Self.self, from: data)
+        return .matching(try JSONDecoder().decode(Self.self, from: data))
     }
     static func withCSV<T>(_ url: URL, _ body: (Int32) throws -> T) throws -> T {
         try DurableFile.directory(url.deletingLastPathComponent())
