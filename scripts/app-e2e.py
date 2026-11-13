@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Drive the actual app through macOS accessibility; never reads a credential value."""
-import json, pathlib, plistlib, subprocess, sys, time
+import json, pathlib, plistlib, subprocess, sys, time, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 APP=ROOT/'dist/WYSIWAG.app'
 EVIDENCE=ROOT/'docs/verification/evidence'
 SCREENSHOTS=ROOT/'docs/screenshots'
+TEST_OUTBOX=pathlib.Path.home()/'Library/Application Support/WYSIWAG-Evidence/Outbox'
+BAD_JOB=str(uuid.uuid4())+'-e2e-malformed.json'
+ATTEMPT=ROOT/'.build/verification/app-e2e-attempt.json'
+test_started=False
+locked=False
 for folder in [EVIDENCE, SCREENSHOTS]: folder.mkdir(parents=True,exist_ok=True)
 
 def run(args, **kwargs): return subprocess.run(args,check=True,capture_output=True,text=True,**kwargs).stdout.strip()
@@ -78,7 +83,12 @@ def screenshot(pid,path):
     run(['screencapture','-x','-o','-l',str(window['id']),str(path)])
 
 try:
+    locked='"CGSSessionScreenIsLocked"=Yes' in run(['ioreg','-n','Root','-d1'])
+    if locked: raise RuntimeError('Desktop is locked; real app UI verification requires an unlocked session')
+    test_started=True
     stop()
+    TEST_OUTBOX.mkdir(parents=True,exist_ok=True,mode=0o700)
+    (TEST_OUTBOX/BAD_JOB).write_text('{broken')
     subprocess.run(['security','delete-generic-password','-s','com.wysiwag.evidence','-a','jevKey'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     pid=launch('--reset-evidence','--language','en')
     assert ui('interval')=='5', 'first-run interval'
@@ -112,6 +122,9 @@ try:
     screenshot(pid,EVIDENCE/'permission-state.png')
     ui('section-Destinations','click')
     assert ui('notion-enabled','enabled')=='false' and ui('google-enabled','enabled')=='false', 'unconfigured cloud destinations cannot be enabled'
+    quarantined_files=list((TEST_OUTBOX/'Quarantine').iterdir())
+    assert any(path.name.endswith(BAD_JOB) for path in quarantined_files), 'malformed test job preserved in quarantine'
+    assert ui('quarantine-status')=='Quarantined files: '+str(len(quarantined_files)), 'quarantine count reported in UI'
     screenshot(pid,EVIDENCE/'destinations-en.png')
     ui('section-Privacy','click'); screenshot(pid,EVIDENCE/'privacy-en.png')
     ui('section-General','click'); ui('language','pick','Japanese'); ui('save-settings','click')
@@ -121,14 +134,22 @@ try:
     screenshot(pid,SCREENSHOTS/'settings-ja.png')
     stop(); pid=launch()
     assert ui('mode-AUTO')=='選択中', 'Japanese persists after relaunch'
-    report={'firstLaunch':'passed','modes':'passed','intervalPersistence':'passed','fakeKeySetAndDeleted':'passed',
+    report={'quarantineReporting':'passed','firstLaunch':'passed','modes':'passed','intervalPersistence':'passed','fakeKeySetAndDeleted':'passed',
             'languagePersistence':'passed','screenRecordingPermission':permission,'liveModeAttempts':{'ALL':all_permission,'AUTO':permission},'keychainService':'com.wysiwag.evidence'}
     (EVIDENCE/'app-e2e.json').write_text(json.dumps(report,indent=2)+'\n')
     print('PASS: real app launch, modes, interval, Keychain set/delete, settings relaunch, Japanese UI')
     print('Screen Recording permission:',permission)
+    ATTEMPT.parent.mkdir(parents=True,exist_ok=True)
+    ATTEMPT.write_text(json.dumps({'result':'passed','report':report},indent=2)+'\n')
 except Exception as error:
+    ATTEMPT.parent.mkdir(parents=True,exist_ok=True)
+    ATTEMPT.write_text(json.dumps({'result':'blocked' if locked else 'failed','reason':'desktop_locked' if locked else type(error).__name__,'historicalEvidencePreserved':True if locked else None},indent=2)+'\n')
     print('App E2E failed:', type(error).__name__, str(error),file=sys.stderr)
     sys.exit(1)
 finally:
+    for folder in ([TEST_OUTBOX, TEST_OUTBOX/'Quarantine'] if test_started else []):
+        if folder.exists():
+            for path in folder.glob('*'+BAD_JOB): path.unlink()
     # Fake test item only; no production Keychain operation.
-    subprocess.run(['security','delete-generic-password','-s','com.wysiwag.evidence','-a','jevKey'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    if test_started: stop()
+    if test_started: subprocess.run(['security','delete-generic-password','-s','com.wysiwag.evidence','-a','jevKey'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

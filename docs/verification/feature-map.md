@@ -12,6 +12,13 @@ This map follows BRIEF.md Amendment 1. Commands are acceptance checks, not claim
 | SMART Jev on every capture, including first | `verify` local HTTP server counts six requests | Disabled without key; set fake key, select, clear |
 | SMART failure status + changed fallback + backoff | HTTP error unit tests; 429/529 CLI probes | Status menu and missing-key sweep |
 | CSV header, RFC 4180, newline, local offset, day, dwell | Unit tests + real CLI CSV parsed independently | Folder picker, open folder |
+| Interrupted append / all-destination commit recovery | `RecoveryTests`: quoted multiline truncation, four commit boundaries, concurrent drain/append | Journal + offset; physical power-cut behavior unverified |
+| Recovered live baseline / capture retirement | Real checkpoint failure → resume/replacement; cancellation and serialized comparison/dwell regressions | Pause/lock/apply task chain |
+| Malformed jobs / unresolved journals | Quarantine/status/retry/drain and independent-batch isolation regressions | New counts localized; latest desktop UI blocked |
+| OAuth session isolation / refresh coalescing | `SessionRegressionTests`: delayed refresh versus reauthorization for both providers; one HTTP request for concurrent refreshes | Queue pauses during sign-in |
+| Notion listener retirement | Cancel then immediately authorize without awaiting old call | Fixed port 43871 reuse |
+| Jev cooldown across settings/relaunch | Persisted deadline and injected-clock regression | SMART errors clear when applying ALL/AUTO |
+| Evidence immutability / MIT license | `verify.sh` hashes tracked OCR snapshot; outputs in `.build/verification`; full LICENSE | Dated report distinguishes current/historical evidence |
 | Notion OAuth, state, Keychain and granted database picker | Mock token/search unit tests; OAuth callback tests | Setup UI; live auth requires user's public integration |
 | Notion data-source parent/schema and select/rich_text | Mock API writer tests + local HTTP E2E | Database chooser |
 | Notion 2000 units / 100 children / byte cap / continuation | Long bilingual payload against enforcing mock server | Long-text QA |

@@ -21,6 +21,6 @@ jobs:
         with:
           name: core-e2e-evidence
           path: |
-            docs/verification/evidence/core-e2e.json
-            docs/verification/evidence/fixture-csv-head.csv
-            docs/verification/evidence/ocr-dry-run.csv
+            .build/verification/core-e2e.json
+            .build/verification/fixture-csv-head.csv
+            .build/verification/ocr-dry-run.csv

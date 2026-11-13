@@ -43,13 +43,13 @@ Optional **Accessibility** permission improves focused secure-text-field detecti
 
 Default interval: 5 seconds. Captures are serial: slow OCR or a classifier request does not cause overlapping captures. AUTO's default similarity threshold is 0.90. SMART is unavailable without your own TypeSafe key from [console.typesafe.ai](https://console.typesafe.ai/).
 
-SMART errors **keep the row as changed**, show an error in the status menu, and retry on later captures with bounded exponential backoff. `Retry-After` is respected for 429/529. Rows during cooldown are also kept; the app never silently substitutes AUTO. Invalid requests, credentials, oversized input and malformed responses are surfaced through sanitized status messages. Each text is capped at 22,000 UTF-8 bytes with a truncation note, leaving ample space below the 64k context for metadata and the question. See the [System One API](https://docs.typesafe.ai/api/system-one) and [error rules](https://docs.typesafe.ai/api/errors).
+SMART errors **keep the row as changed**, show an error in the status menu, and retry on later captures with bounded exponential backoff. `Retry-After` is respected for 429/529. The deadline survives settings changes and relaunch; switching to ALL/AUTO clears the displayed SMART error without resetting its cooldown. Rows during cooldown are also kept; the app never silently substitutes AUTO. Invalid requests, credentials, oversized input and malformed responses are surfaced through sanitized status messages. Each text is capped at 22,000 UTF-8 bytes with a truncation note, leaving ample space below the 64k context for metadata and the question. See the [System One API](https://docs.typesafe.ai/api/system-one) and [error rules](https://docs.typesafe.ai/api/errors).
 
 ## Destinations
 
 ### Local CSV (always enabled)
 
-Choose a folder; the default is `~/Documents/WYSIWAG`. A daily file is named `wysiwag-YYYY-MM-DD.csv`. Newly created directories/files use owner-only permissions (0700/0600). Successful local writes are flushed before cloud jobs are enqueued.
+Choose a folder; the default is `~/Documents/WYSIWAG`. A daily file is named `wysiwag-YYYY-MM-DD.csv`. Newly created directories/files use owner-only permissions (0700/0600). A write-ahead journal records the CSV bytes and all enabled destination intents together. CSV data and its `.csv.offset` checkpoint are flushed before the corresponding outbox batch becomes eligible for delivery. Recovery completes interrupted appends before recording again, including multiline quoted fields; legacy files without a checkpoint retain their last complete RFC 4180 record.
 
 ```csv
 timestamp,active_app,window_title,visible_text,dwell_seconds
@@ -90,9 +90,15 @@ Rows append via [`values:append`](https://developers.google.com/workspace/sheets
 
 ### Retry queue and recovery
 
-Cloud destinations can run together. Pending jobs (including captured text, never credentials) live in `~/Library/Application Support/WYSIWAG/Outbox`, one file per row/destination. Failures retain jobs across relaunch. Exponential backoff and `Retry-After` prevent rapid retry loops; configuration/authentication errors or 12 failed attempts require **Retry blocked writes** after fixing the problem. Disabled or changed targets stop sending unmatched jobs; re-enable the original target to resume them.
+Cloud destinations can run together. Pending jobs (including captured text, never credentials) live in `~/Library/Application Support/WYSIWAG/Outbox`, one batch per row containing all enabled destinations (older single-job files remain readable). Failures retain jobs across relaunch. Exponential backoff and `Retry-After` prevent rapid retry loops; configuration/authentication errors or 12 failed attempts require **Retry blocked writes** after fixing the problem. Disabled or changed targets stop sending unmatched jobs; re-enable the original target to resume them.
 
-Delivery is **at least once**, not exactly once: a lost response or a crash after a remote commit can produce duplicate cloud rows/blocks. The local CSV remains authoritative. Disk errors pause capture and surface an error. A crash or disk failure between the CSV flush and queue persistence can leave a local-only row; v0.1 has no automatic CSV backfill/import tool. A corrupt queue file is retained and reported, never silently deleted. Monitor local storage: no automatic retention limit deletes your data.
+Delivery is **at least once**, not exactly once: a lost response or a crash after a remote commit can produce duplicate cloud rows/blocks. The local CSV remains authoritative. A durable `.txn` journal repairs interrupted CSV/outbox commits using stable job identities; a batch cannot send while its journal remains. Disk errors pause capture. Recovery reconciles the live comparison/dwell baseline before resuming or replacing the recorder.
+
+Malformed job files move to `Outbox/Quarantine` with their original bytes preserved, and Settings reports their count; other jobs continue. An unresolved journal (for example, a missing CSV volume or damaged file) stays in place, blocks only its own batch, and appears as **Unresolved local writes**. Restore folder access or repair the retained data before retrying. No automatic historical CSV import or retention deletion is included.
+
+Persistence uses file and directory synchronization with macOS `F_FULLFSYNC`; a filesystem that cannot provide these operations reports a write error. Tests construct interrupted on-disk states and induce a real checkpoint-write failure; they do **not** simulate a physical power cut or certify storage hardware. Keep the CSV, checkpoints and journals together when backing up or moving data.
+
+OAuth authorization advances a session generation. Refreshes are coalesced, credential records carry revisions, and stale responses cannot overwrite a newer session or Google’s memory cache. Background draining pauses through sign-in, and canceled loopback listeners finish closing before another attempt binds the port.
 
 ## What leaves the Mac
 
@@ -122,7 +128,7 @@ swift run wysiwag-cli capture --once --dry-run
 swift run wysiwag-cli capture --once --dry-run --live
 ```
 
-The default CLI dry-run runs real Vision OCR on a bundled, synthetic bilingual image without requiring Screen Recording. It does not prove live ScreenCaptureKit permission. Core E2E asserts real CSV, exact dwell, ALL/AUTO/SMART, every-capture Jev calls, Notion/Sheets limits, 429 cooldown, persistent outage recovery and independently parsed CSV. CI runs on macOS. App E2E requires a logged-in desktop and accessibility automation permissions.
+The default CLI dry-run runs real Vision OCR on a bundled, synthetic bilingual image without requiring Screen Recording. It does not prove live ScreenCaptureKit permission. Core E2E asserts real CSV, exact dwell, ALL/AUTO/SMART, every-capture Jev calls, Notion/Sheets limits, 429 cooldown, persistent outage recovery and independently parsed CSV. CI runs on macOS. App E2E requires an unlocked desktop and accessibility automation permissions. Core E2E writes fresh reports to `.build/verification` (override with `WYSIWAG_EVIDENCE_DIR`); it never rewrites the committed OCR snapshot by default. `verify.sh` checks that snapshot remains unchanged. Recovery/session regressions cover interrupted multiline writes, destination-intent recovery, refresh versus reauthorization, task retirement, quarantined jobs and persistent Jev deadlines.
 
 See the [feature map](docs/verification/feature-map.md), [QA log](docs/verification/qa-log.md), and [evidence report](docs/verification/evidence/README.md). Live cloud consent and writes require your own accounts and are not simulated as verified production results.
 
