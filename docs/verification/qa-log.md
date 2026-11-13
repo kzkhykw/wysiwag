@@ -66,3 +66,15 @@ The user’s further independent verification confirmed the earlier P1 fixes and
 | Valid continuation must still send all remaining text | HTTP mock asserts the correct page, PATCH operation and exact remaining paragraphs | Passed |
 
 Five new regressions bring the suite to 42 tests. `scripts/verify.sh` passed in full: build/test, loopback core E2E, signed app packaging, packaged OCR, scans and unchanged committed OCR. A fresh separate read-only reviewer found no actionable findings. Current results are recorded in [p2-followup-2026-11-14.json](evidence/p2-followup-2026-11-14.json). Existing UI, provider and physical-power-loss limitations remain unchanged; this change adds no fresh live/UI claim. No GitHub comments or repository visibility changes are part of this work.
+
+## Opaque-journal follow-up of 3e5f7ea — 2026-11-14
+
+The user confirmed N1/N2 and found a remaining P2: treating unknown journal ownership like an unrelated target allowed a stale checkpoint to erase a fully written pending row after restart. The new restart regression failed against the previous implementation, including both a complete multiline row alone and that row followed by an incomplete quoted tail.
+
+| Finding | Fix / regression protection | Result |
+| --- | --- | --- |
+| Opaque journal + stale checkpoint discards complete row B | Explicit `Routing.unknown` versus `.unrelated`; unknown ownership requires an RFC 4180 complete-record scan. Truncation cannot go below that boundary. Restart fixture asserts A+B+C, then A+B+C+D after another restart, checkpoint advancement and byte-preserved/gated damaged journal and batch | Passed |
+| Preserve independent capture and fail safely for known matching corruption | Existing another-day/folder and matching-target corruption regressions retained | Passed |
+| Continuation payload assertions could pass without HTTP | Shared thread-safe request counter; `validNotionContinuationSendsAllRemainingText` now requires exactly one request after delivery | Passed |
+
+The suite now has 43 tests. `scripts/verify.sh` passed in full and committed OCR evidence is unchanged. The separate read-only reviewer found no actionable findings in this diff. See [opaque-journal evidence](evidence/opaque-journal-2026-11-14.json) for the full verification result. No new UI, live-provider or physical-power-loss claim is made; the earlier limitations remain. Repository visibility is unchanged and no GitHub comments are posted.

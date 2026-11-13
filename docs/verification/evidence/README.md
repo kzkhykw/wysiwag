@@ -1,12 +1,12 @@
 # Verification evidence
 
-Latest core verification: **2026-11-14**, Apple Silicon, macOS 26.0.1, Swift 6.2.4; 42 tests passed. Deployment target: macOS 14. The previous follow-up’s app UI attempt was **blocked by the locked desktop**; UI was not rerun for this core-only follow-up. UI screenshots and the successful app report below are historical, from **2026-11-13**, before the follow-up fixes. All committed screen/text evidence is synthetic. No production credentials were used.
+Latest core verification: **2026-11-14**, Apple Silicon, macOS 26.0.1, Swift 6.2.4; 43 tests passed. Deployment target: macOS 14. The previous follow-up’s app UI attempt was **blocked by the locked desktop**; UI was not rerun for this core-only follow-up. UI screenshots and the successful app report below are historical, from **2026-11-13**, before the follow-up fixes. All committed screen/text evidence is synthetic. No production credentials were used.
 
-The [latest P2 follow-up report](p2-followup-2026-11-14.json) records current results and five new regressions; the [earlier follow-up report](followup-2026-11-14.json) retains the previous 37-test run and UI limitation. Fresh core outputs live under `.build/verification`; routine verification no longer rewrites committed OCR evidence.
+The [opaque-journal report](opaque-journal-2026-11-14.json) records the current 43-test run, restart regression and explicit Notion request count. The [previous P2 report](p2-followup-2026-11-14.json) retains its 42-test run; the [earlier follow-up report](followup-2026-11-14.json) retains the previous 37-test run and UI limitation. Fresh core outputs live under `.build/verification`; routine verification no longer rewrites committed OCR evidence.
 
 | Check | Result | Artifact |
 | --- | --- | --- |
-| `swift build` / `swift test` | Passed; 42 tests | [Test sources](../../../Tests/WYSIWAGCoreTests) |
+| `swift build` / `swift test` | Passed; 43 tests | [Test sources](../../../Tests/WYSIWAGCoreTests) |
 | `scripts/core-e2e.sh` | ALL 6 rows / 0 Jev requests; AUTO 4 / 0; SMART 4 / 6 | [Machine report](core-e2e.json) |
 | Network outage → recovery | CSV intact in all modes; persisted queues drained after server recovery | [Machine report](core-e2e.json) |
 | Notion/Sheets payload and rate limits | 2,000-unit rich text, 100-child batches, byte budget, 49,000-unit cells, RAW and Retry-After passed | [Driver](../../../Sources/WYSIWAGCLI/VerificationDriver.swift), [enforcing server](../../../scripts/mock-services.py) |
@@ -15,7 +15,8 @@ The [latest P2 follow-up report](p2-followup-2026-11-14.json) records current re
 | Crash/truncation recovery and all-destination intent | Four interrupted commit boundaries, quoted multiline tail, stable IDs, concurrent capture/drain | [Recovery tests](../../../Tests/WYSIWAGCoreTests/RecoveryTests.swift) |
 | Live baseline, capture retirement and job isolation | Real checkpoint failure → resume/replacement; malformed jobs quarantined; unresolved journal does not starve others | [Recovery tests](../../../Tests/WYSIWAGCoreTests/RecoveryTests.swift) |
 | Malformed journal during later capture | Another day/folder continues; opaque and readable-target damage retained; same-target damage still stops that CSV | [Recovery tests](../../../Tests/WYSIWAGCoreTests/RecoveryTests.swift) |
-| Invalid Notion continuation progress | Negative, out-of-range, terminal and inconsistent progress quarantined; original mixed-batch bytes preserved; valid siblings/continuations send | [Recovery tests](../../../Tests/WYSIWAGCoreTests/RecoveryTests.swift), [writer tests](../../../Tests/WYSIWAGCoreTests/IntegrationTests.swift) |
+| Invalid Notion continuation progress | Negative, out-of-range, terminal and inconsistent progress quarantined; original mixed-batch bytes preserved; valid siblings/continuations send; exactly one HTTP request asserted | [Recovery tests](../../../Tests/WYSIWAGCoreTests/RecoveryTests.swift), [writer tests](../../../Tests/WYSIWAGCoreTests/IntegrationTests.swift) |
+| Opaque journal + stale checkpoint after restart | Complete multiline B survives A-checkpoint + next append; optional partial tail removed; subsequent restart preserves all rows; damaged journal/batch stay gated | [Restart regression](../../../Tests/WYSIWAGCoreTests/RecoveryTests.swift), [current report](opaque-journal-2026-11-14.json) |
 | OAuth sessions and listener teardown | Both providers reject delayed refresh after reauthorization; concurrent refreshes coalesce; cancel/rebind succeeds | [Session tests](../../../Tests/WYSIWAGCoreTests/SessionRegressionTests.swift) |
 | Jev persisted deadline | Settings threshold change, new instance and relaunch before/after expiry | [Session tests](../../../Tests/WYSIWAGCoreTests/SessionRegressionTests.swift) |
 | Latest desktop UI | **2026-11-14 blocked: screen locked**; new queue indicators compiled/localized, visual check outstanding | [Follow-up report](followup-2026-11-14.json) |
