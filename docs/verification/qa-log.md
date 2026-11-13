@@ -52,3 +52,17 @@ The independent Mac verification supplied by the user superseded the earlier cle
 Final `scripts/verify.sh`: 37 tests, loopback core E2E, signed release packaging, packaged bilingual OCR, 113 translated strings, secret scan and committed-OCR immutability check. See the [dated follow-up report](evidence/followup-2026-11-14.json). The separate reviewer rechecked the three follow-up fixes and reported no remaining actionable findings. UI changes (quarantine/recovery indicators) are compiled and localized but have not been visually verified on this locked desktop. The 2026-11-13 real UI report/screenshots remain historical evidence.
 
 Still unverified: physical power-cut behavior, live ScreenCaptureKit capture (previous run denied permission), real Notion/Google consent and writes, and Notion portal acceptance of the configured loopback URI. Cloud delivery remains at least once, so lost acknowledgements may duplicate remote writes. Unsupported full-flush filesystems fail with a local-write error.
+
+## Follow-up verification of b60b461 — 2026-11-14
+
+The user’s further independent verification confirmed the earlier P1 fixes and found two remaining P2 cases. The new regression tests were run against the old implementation first: unrelated capture threw `localWrite`, and invalid continuation jobs reached the delivery probe instead of quarantine. Both tests now pass after implementation fixes.
+
+| Finding | Fix / regression protection | Result |
+| --- | --- | --- |
+| Malformed shared journal blocks later captures to another CSV | Decode only the routing field first; fully decode only matching transactions. Unrouteable journals and their matching batches remain retained/gated. Retry does not rewrite gated batches. Test both another day and another folder, with opaque and readable-target malformed journals; verify original bytes and independent delivery | Passed |
+| Known matching malformed journal must still stop its own append | Retain the error for the current target rather than ignoring all decode failures; CSV and journal bytes remain unchanged | Passed |
+| Valid JSON with negative/out-of-range Notion progress can trap or silently drop remaining text | Validate bounds and page/progress consistency at queue load and writer entry; guard payload slicing; validate retry counters and Sheets progress too | Passed |
+| Invalid job shares a batch with valid work | Durably preserve original bytes before replacing the batch with valid siblings; test legacy and mixed-batch formats through status/retry/drain | Passed |
+| Valid continuation must still send all remaining text | HTTP mock asserts the correct page, PATCH operation and exact remaining paragraphs | Passed |
+
+Five new regressions bring the suite to 42 tests. `scripts/verify.sh` passed in full: build/test, loopback core E2E, signed app packaging, packaged OCR, scans and unchanged committed OCR. A fresh separate read-only reviewer found no actionable findings. Current results are recorded in [p2-followup-2026-11-14.json](evidence/p2-followup-2026-11-14.json). Existing UI, provider and physical-power-loss limitations remain unchanged; this change adds no fresh live/UI claim. No GitHub comments or repository visibility changes are part of this work.

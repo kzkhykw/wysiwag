@@ -14,7 +14,8 @@ This map follows BRIEF.md Amendment 1. Commands are acceptance checks, not claim
 | CSV header, RFC 4180, newline, local offset, day, dwell | Unit tests + real CLI CSV parsed independently | Folder picker, open folder |
 | Interrupted append / all-destination commit recovery | `RecoveryTests`: quoted multiline truncation, four commit boundaries, concurrent drain/append | Journal + offset; physical power-cut behavior unverified |
 | Recovered live baseline / capture retirement | Real checkpoint failure → resume/replacement; cancellation and serialized comparison/dwell regressions | Pause/lock/apply task chain |
-| Malformed jobs / unresolved journals | Quarantine/status/retry/drain and independent-batch isolation regressions | New counts localized; latest desktop UI blocked |
+| Malformed jobs / unresolved journals | Quarantine/status/retry/drain; opaque/readable-target malformed journal while capturing another day/folder; same-target failure retained | Counts localized; latest desktop UI blocked |
+| Notion continuation validity / mixed batches | Negative, out-of-range, terminal and inconsistent progress rejected before HTTP; original bytes retained and valid siblings drain; exact continuation text test | Legacy and batched records covered |
 | OAuth session isolation / refresh coalescing | `SessionRegressionTests`: delayed refresh versus reauthorization for both providers; one HTTP request for concurrent refreshes | Queue pauses during sign-in |
 | Notion listener retirement | Cancel then immediately authorize without awaiting old call | Fixed port 43871 reuse |
 | Jev cooldown across settings/relaunch | Persisted deadline and injected-clock regression | SMART errors clear when applying ALL/AUTO |
