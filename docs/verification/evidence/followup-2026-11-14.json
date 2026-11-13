@@ -1,0 +1,82 @@
+{
+  "date": "2026-11-14",
+  "reviewedBase": "ab3c771",
+  "environment": {
+    "macOS": "26.0.1",
+    "architecture": "arm64",
+    "swift": "6.2.4"
+  },
+  "verify": {
+    "command": "scripts/verify.sh",
+    "exitCode": 0,
+    "testsPassed": 37,
+    "localizedStrings": 113,
+    "checks": [
+      "PASS: no key-like strings in 3325 source/build files",
+      "PASS: 113 UI strings translated in en + ja",
+      "PASS: OCR → ALL/AUTO/SMART → CSV + Notion + Sheets; outage recovery, limits and Retry-After",
+      "PASS: independent CSV parser, exact dwell times, bilingual text and empty durable queues",
+      "PASS: packaged resources and bilingual OCR",
+      "PASS: no key-like strings in 3325 source/build files",
+      "PASS: committed OCR evidence is unchanged"
+    ]
+  },
+  "coreE2E": {
+    "longText": "passed",
+    "results": [
+      {
+        "jevRequests": 0,
+        "mode": "ALL",
+        "outageRecovery": "passed",
+        "rows": 6
+      },
+      {
+        "jevRequests": 0,
+        "mode": "AUTO",
+        "outageRecovery": "passed",
+        "rows": 4
+      },
+      {
+        "jevRequests": 6,
+        "mode": "SMART",
+        "outageRecovery": "passed",
+        "rows": 4
+      }
+    ],
+    "retryAfter": "passed"
+  },
+  "appE2E": {
+    "result": "blocked",
+    "reason": "desktop_locked",
+    "historicalEvidencePreserved": true
+  },
+  "historicalAppEvidenceDate": "2026-11-13",
+  "committedOCR": {
+    "unchanged": true,
+    "sha256": "f3ac3283f4a8bfe3c06455daa2a09e11ffa020488c35deca0aa191eddb65d9f2"
+  },
+  "newRegressionTests": [
+    "csvJournalRecoversCrashAtEveryCommitBoundary",
+    "legacyAndCheckpointedCSVRecoverMultilineTail",
+    "malformedJobIsQuarantinedWithoutStarvingOtherDestinations",
+    "retiringCaptureCompletesBeforeResumeAndReplacement",
+    "recorderSerializesBaselineAndDwellAcrossSuspensions",
+    "recoveredCommitReconcilesLiveBaselineBeforeResumeOrReplacement",
+    "unrecoverableTransactionsDoNotBlockIndependentJobs",
+    "concurrentRecordingAndJournalRecoveryPreserveAllRowsAndJobs",
+    "googleOldRefreshCannotOverwriteReauthorization",
+    "notionOldRefreshCannotOverwriteReauthorization",
+    "providersCoalesceConcurrentRefreshes",
+    "notionCancelThenReconnectAwaitsListenerShutdown",
+    "jevCooldownSurvivesThresholdChangesRebuildAndRelaunch"
+  ],
+  "independentReview": "No remaining actionable findings after fixes and read-only re-review",
+  "limitations": [
+    "Latest UI rerun blocked: desktop locked; new queue indicators not visually verified",
+    "Prior Screen Recording attempts denied; no 30-second live capture claimed",
+    "Real Notion/Google consent and writes, and Notion portal redirect acceptance unverified",
+    "Interrupted states and filesystem-error recovery tested, not physical power loss",
+    "Cloud delivery at least once; remote acknowledgement loss can duplicate writes",
+    "Unsupported full-flush filesystems report local-write failure"
+  ]
+}

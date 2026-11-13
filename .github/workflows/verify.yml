@@ -1,0 +1,26 @@
+name: Verify macOS
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Build, unit tests, loopback E2E, package and secret scan
+        run: scripts/verify.sh
+      - name: Upload synthetic verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-e2e-evidence
+          path: |
+            .build/verification/core-e2e.json
+            .build/verification/fixture-csv-head.csv
+            .build/verification/ocr-dry-run.csv

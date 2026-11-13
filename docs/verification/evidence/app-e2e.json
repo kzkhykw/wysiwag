@@ -1,0 +1,13 @@
+{
+  "firstLaunch": "passed",
+  "modes": "passed",
+  "intervalPersistence": "passed",
+  "fakeKeySetAndDeleted": "passed",
+  "languagePersistence": "passed",
+  "screenRecordingPermission": "denied",
+  "liveModeAttempts": {
+    "ALL": "denied",
+    "AUTO": "denied"
+  },
+  "keychainService": "com.wysiwag.evidence"
+}
