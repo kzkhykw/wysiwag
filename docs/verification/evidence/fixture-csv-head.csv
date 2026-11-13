@@ -1,0 +1,21 @@
+timestamp,active_app,window_title,visible_text,dwell_seconds
+2023-11-15T07:13:20.000+09:00,Editor,Document,"WYSIWAG OCR verification
+Visible text stays on your Mac.
+日本語の画面を記録します。
+CSV / Not [preview truncated]",0.000
+2023-11-15T07:13:25.000+09:00,Editor,Document,"WYSIWAG OCR verification
+Visible text stays on your Mac.
+日本語の画面を記録します。
+CSV / Not [preview truncated]",5.000
+2023-11-15T07:13:30.000+09:00,Editor,Document,"A different screen
+Project notes have changed.
+次の画面に切り替えました。
+Meeting at ten o cl [preview truncated]",5.000
+2023-11-15T07:13:35.000+09:00,Browser,Document,"A different screen
+Project notes have changed.
+次の画面に切り替えました。
+Meeting at ten o cl [preview truncated]",5.000
+2023-11-15T07:13:40.000+09:00,Browser,Second tab,"A different screen
+Project notes have changed.
+次の画面に切り替えました。
+Meeting at ten o cl [preview truncated]",5.000

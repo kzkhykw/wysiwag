@@ -5,3 +5,8 @@ DerivedData/
 xcuserdata/
 .env
 *.csv
+!docs/verification/evidence/fixture-csv-head.csv
+!docs/verification/evidence/ocr-dry-run.csv
+dist/
+*.log
+__pycache__/
