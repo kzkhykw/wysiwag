@@ -1,0 +1,2 @@
+import WYSIWAGCore
+print("WYSIWAG")
