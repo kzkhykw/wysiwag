@@ -67,6 +67,16 @@ struct CSVTransaction: Codable {
             .filter { $0.pathExtension == "txn" }.sorted { $0.path < $1.path }
     }
     static func read(_ url: URL) throws -> Self { try JSONDecoder().decode(Self.self, from: Data(contentsOf: url)) }
+    static func read(_ url: URL, forCSV csvURL: URL) throws -> Self? {
+        // Route before decoding the transaction. Unrouteable journals remain retained and
+        // keep their batches gated; they cannot prevent recording to independent CSVs.
+        struct Target: Decodable { let csvURL: URL }
+        guard let data = try? Data(contentsOf: url),
+              let target = try? JSONDecoder().decode(Target.self, from: data),
+              target.csvURL.standardizedFileURL == csvURL.standardizedFileURL else { return nil }
+        // A damaged transaction known to belong to this CSV still stops its append.
+        return try JSONDecoder().decode(Self.self, from: data)
+    }
     static func withCSV<T>(_ url: URL, _ body: (Int32) throws -> T) throws -> T {
         try DurableFile.directory(url.deletingLastPathComponent())
         let fd = open(url.path, O_RDWR | O_CREAT | O_NOFOLLOW, 0o600)
@@ -87,6 +97,7 @@ struct CSVTransaction: Codable {
         }
     }
     func finish(at journal: URL, fd: Int32) throws {
+        for job in jobs { try job.validateProgress() }
         let size = lseek(fd, 0, SEEK_END)
         guard offset >= 0, size >= offset, size <= offset + Int64(bytes.count),
               bytes == Data(((offset == 0 ? CSV.header : "") + CSV.encode(row)).utf8) else { throw SafeFailure.localWrite }

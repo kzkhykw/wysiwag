@@ -34,6 +34,22 @@ public struct CloudJob: Codable, Sendable, Identifiable {
             settings.googleEnabled && target == settings.spreadsheetID && sheetName == settings.sheetName && clientID == settings.googleClientID
         }
     }
+
+    func validateProgress(notionBlockCount: Int? = nil) throws {
+        guard (0...12).contains(attempts), attempts < 12 || blocked else { throw SafeFailure.invalidConfiguration }
+        switch destination {
+        case .notion:
+            let count = notionBlockCount ?? TextChunks.split(row.screen.text, limit: 2000).count
+            if let pageID {
+                // Only incomplete continuations are persisted; completed jobs are removed.
+                guard UUID(uuidString: pageID) != nil, nextBlock > 0, nextBlock < count else { throw SafeFailure.invalidConfiguration }
+            } else {
+                guard nextBlock == 0 else { throw SafeFailure.invalidConfiguration }
+            }
+        case .sheets:
+            guard pageID == nil, nextBlock == 0 else { throw SafeFailure.invalidConfiguration }
+        }
+    }
 }
 
 public protocol CloudWriting: Sendable {
@@ -77,6 +93,7 @@ public enum NotionPayload {
         [["type": "text", "text": ["content": text]]]
     }
     public static func batch(_ blocks: [[String: Any]], start: Int) throws -> [[String: Any]] {
+        guard (0...blocks.count).contains(start) else { throw SafeFailure.invalidConfiguration }
         var output: [[String: Any]] = [], bytes = 0
         for block in blocks.dropFirst(start).prefix(100) {
             let size = try JSONSerialization.data(withJSONObject: block).count
@@ -168,7 +185,9 @@ public actor NotionWriter: CloudWriting {
     }
 
     public func deliver(_ job: CloudJob) async throws -> CloudJob? {
+        guard job.destination == .notion else { throw SafeFailure.invalidConfiguration }
         let blocks = NotionPayload.paragraphs(job.row.screen.text)
+        try job.validateProgress(notionBlockCount: blocks.count)
         let batch = try NotionPayload.batch(blocks, start: job.nextBlock)
         var updated = job
         if let pageID = job.pageID {
@@ -216,6 +235,8 @@ public actor SheetsWriter: CloudWriting {
         self.http = http; self.accessToken = accessToken; self.mockBaseURL = mockBaseURL
     }
     public func deliver(_ job: CloudJob) async throws -> CloudJob? {
+        guard job.destination == .sheets else { throw SafeFailure.invalidConfiguration }
+        try job.validateProgress()
         let token = try await accessToken(job.clientID)
         let original = try SheetsPayload.url(spreadsheetID: job.target, sheetName: job.sheetName)
         let url = mockBaseURL.map { URL(string: original.path(percentEncoded: true) + "?" + (original.query ?? ""), relativeTo: $0)!.absoluteURL } ?? original

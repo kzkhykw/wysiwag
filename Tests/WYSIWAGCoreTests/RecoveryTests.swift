@@ -156,6 +156,95 @@ extension CoreTests {
 }
 
 extension CoreTests {
+    @Test func malformedJournalDoesNotBlockCapturesToAnotherDayOrFolder() async throws {
+        for anotherFolder in [false, true] {
+            for opaque in [false, true] {
+                let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                defer { try? FileManager.default.removeItem(at: root) }
+                let folder = root.appendingPathComponent("csv"), outbox = root.appendingPathComponent("outbox")
+                let probe = DeliveryProbe(), queue = RetryQueue(folder: outbox, notion: probe, sheets: probe)
+                var settings = AppSettings(); settings.mode = .all; settings.notionEnabled = true; settings.googleEnabled = true
+                let first = CaptureRow(screen: sample("old day"), previousWrittenAt: nil)
+                try await CSVWriter(folder: folder).append(first)
+                let original = folder.appendingPathComponent("wysiwag-\(first.day).csv")
+                let oldBytes = try Data(contentsOf: original)
+                let jobs = RetryQueue.jobs(row: first, settings: settings)
+                let id = UUID(), journal = outbox.appendingPathComponent(id.uuidString + ".txn")
+                let badBytes = opaque ? Data("{damaged".utf8) : try JSONSerialization.data(withJSONObject: ["csvURL": original.absoluteString, "row": "damaged"])
+                try DurableFile.replace(badBytes, at: journal)
+                let batch = journal.deletingPathExtension().appendingPathExtension("json")
+                let batchBytes = try JSONEncoder().encode(OutboxBatch(jobs: jobs))
+                try DurableFile.replace(batchBytes, at: batch)
+                let target = anotherFolder ? root.appendingPathComponent("other-csv") : folder
+                let next = sample("new capture", date: first.screen.timestamp.addingTimeInterval(anotherFolder ? 5 : 86_400))
+                let recorder = CaptureRecorder(csv: CSVWriter(folder: target), queue: queue)
+                #expect(try await recorder.record(next, settings: settings, classifier: AutoClassifier()))
+                try await queue.retryBlocked(); try await queue.drain(settings: settings)
+                let delivered = await probe.received
+                #expect(delivered.count == 2 && Set(delivered).isDisjoint(with: Set(jobs.map(\.id))))
+                let row = CaptureRow(screen: next, previousWrittenAt: nil)
+                #expect(try String(contentsOf: target.appendingPathComponent("wysiwag-\(row.day).csv"), encoding: .utf8) == CSV.header + CSV.encode(row))
+                #expect(try Data(contentsOf: original) == oldBytes)
+                #expect(try Data(contentsOf: journal) == badBytes)
+                #expect(try Data(contentsOf: batch) == batchBytes)
+                #expect(try await queue.status().recovering == 1)
+            }
+        }
+    }
+    @Test func invalidNotionProgressIsQuarantinedWhileValidJobsContinue() async throws {
+        for entryPoint in ["status", "retry", "drain"] {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let probe = DeliveryProbe(), queue = RetryQueue(folder: folder, notion: probe, sheets: probe)
+            var settings = AppSettings(); settings.notionEnabled = true; settings.googleEnabled = true
+            let row = CaptureRow(screen: sample(String(repeating: "x", count: 4_001)), previousWrittenAt: nil)
+            let pageID = UUID().uuidString
+            let invalidProgress: [(String?, Int)] = [(nil, -1), (pageID, -1), (pageID, 4), (pageID, Int.max), (pageID, 3), (nil, 1), (pageID, 0), ("", 1)]
+            var invalidJobs: [CloudJob] = []
+            for (page, next) in invalidProgress {
+                var job = CloudJob(row: row, destination: .notion, settings: settings)
+                job.pageID = page; job.nextBlock = next; invalidJobs.append(job)
+            }
+            var invalidAttempts = CloudJob(row: row, destination: .notion, settings: settings)
+            invalidAttempts.attempts = Int.max; invalidJobs.append(invalidAttempts)
+            var invalidSheets = CloudJob(row: row, destination: .sheets, settings: settings)
+            invalidSheets.nextBlock = 1; invalidJobs.append(invalidSheets)
+            let sibling = CloudJob(row: row, destination: .sheets, settings: settings)
+            let batchData = try JSONEncoder().encode(OutboxBatch(jobs: invalidJobs + [sibling]))
+            try DurableFile.replace(batchData, at: folder.appendingPathComponent("000-batch.json"))
+            let legacyData = try JSONEncoder().encode(invalidJobs[0])
+            try DurableFile.replace(legacyData, at: folder.appendingPathComponent("001-legacy.json"))
+            var valid = CloudJob(row: row, destination: .notion, settings: settings)
+            valid.pageID = pageID; valid.nextBlock = 1
+            try DurableFile.replace(JSONEncoder().encode(valid), at: folder.appendingPathComponent("002-valid.json"))
+            if entryPoint == "status" { _ = try await queue.status() }
+            if entryPoint == "retry" { try await queue.retryBlocked() }
+            for _ in 0..<6 { try await queue.drain(settings: settings) }
+            #expect(Set(await probe.received) == Set([sibling.id, valid.id]))
+            let state = try await queue.status()
+            #expect(state.pending == 0 && state.quarantined == 2)
+            let quarantined = try FileManager.default.contentsOfDirectory(at: folder.appendingPathComponent("Quarantine"), includingPropertiesForKeys: nil)
+            let preserved = try quarantined.map { try Data(contentsOf: $0) }
+            #expect(preserved.contains(batchData) && preserved.contains(legacyData))
+        }
+    }
+    @Test func damagedJournalWithMatchingTargetStillStopsThatCSV() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = CaptureRow(screen: sample("first"), previousWrittenAt: nil)
+        let csv = CSVWriter(folder: folder), outbox = folder.appendingPathComponent("outbox")
+        try await csv.append(first, outbox: outbox)
+        let file = folder.appendingPathComponent("wysiwag-\(first.day).csv")
+        let before = try Data(contentsOf: file)
+        let journal = outbox.appendingPathComponent(UUID().uuidString + ".txn")
+        let bytes = try JSONSerialization.data(withJSONObject: ["csvURL": file.absoluteString, "row": "damaged"])
+        try DurableFile.replace(bytes, at: journal)
+        await #expect(throws: SafeFailure.localWrite) {
+            try await csv.append(CaptureRow(screen: sample("second"), previousWrittenAt: first.screen.timestamp), outbox: outbox)
+        }
+        #expect(try Data(contentsOf: file) == before)
+        #expect(try Data(contentsOf: journal) == bytes)
+    }
     @Test func recoveredCommitReconcilesLiveBaselineBeforeResumeOrReplacement() async throws {
         for replaceRecorder in [false, true] {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

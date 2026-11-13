@@ -33,9 +33,20 @@ public actor RetryQueue {
     private func read(_ url: URL) throws -> OutboxBatch? {
         let data: Data
         do { data = try Data(contentsOf: url) } catch { try quarantine(url); return nil }
-        if let batch = try? JSONDecoder().decode(OutboxBatch.self, from: data) { return batch }
-        if let legacy = try? JSONDecoder().decode(CloudJob.self, from: data) { return OutboxBatch(jobs: [legacy]) }
-        try quarantine(url); return nil
+        let batch: OutboxBatch
+        if let decoded = try? JSONDecoder().decode(OutboxBatch.self, from: data) { batch = decoded }
+        else if let legacy = try? JSONDecoder().decode(CloudJob.self, from: data) { batch = OutboxBatch(jobs: [legacy]) }
+        else { try quarantine(url); return nil }
+        let valid = batch.jobs.filter { (try? $0.validateProgress()) != nil }
+        guard valid.count != batch.jobs.count else { return batch }
+        guard !valid.isEmpty else { try quarantine(url); return nil }
+        // Preserve the complete original bytes BEFORE replacing a mixed batch. A crash
+        // cannot discard its valid siblings between quarantine and republication.
+        let retained = folder.appendingPathComponent("Quarantine").appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+        try DurableFile.replace(data, at: retained)
+        let repaired = OutboxBatch(jobs: valid)
+        try save(repaired, at: url)
+        return repaired
     }
     private func save(_ batch: OutboxBatch, at url: URL) throws {
         do {
@@ -75,6 +86,7 @@ public actor RetryQueue {
     }
     public func retryBlocked() throws {
         for url in try files() {
+            guard !FileManager.default.fileExists(atPath: url.deletingPathExtension().appendingPathExtension("txn").path) else { continue }
             guard var batch = try read(url) else { continue }
             for index in batch.jobs.indices where batch.jobs[index].blocked {
                 batch.jobs[index].blocked = false; batch.jobs[index].attempts = 0; batch.jobs[index].nextAttempt = .distantPast

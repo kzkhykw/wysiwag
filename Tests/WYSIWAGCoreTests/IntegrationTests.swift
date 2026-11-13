@@ -3,6 +3,45 @@ import Testing
 @testable import WYSIWAGCore
 
 extension CoreTests {
+    @Test func notionRejectsInvalidProgressBeforeTokenOrHTTPAccess() async throws {
+        let settings = AppSettings()
+        let row = CaptureRow(screen: sample(String(repeating: "x", count: 4_001)), previousWrittenAt: nil)
+        let writer = NotionWriter(http: MockProtocol.client { _ in
+            Issue.record("Invalid progress reached HTTP")
+            return .init(body: Data("{}".utf8))
+        }, token: { Issue.record("Invalid progress reached token access"); return nil })
+        let page = UUID().uuidString
+        for (pageID, next) in [(nil, -1), (page, -1), (page, 4), (page, Int.max), (page, 3), (nil, 1), (page, 0), ("", 1)] as [(String?, Int)] {
+            var job = CloudJob(row: row, destination: .notion, settings: settings)
+            job.pageID = pageID; job.nextBlock = next
+            let invalid = job
+            await #expect(throws: SafeFailure.invalidConfiguration) { try await writer.deliver(invalid) }
+        }
+        let blocks = NotionPayload.paragraphs(row.screen.text)
+        for start in [-1, blocks.count + 1, Int.max] {
+            #expect(throws: SafeFailure.invalidConfiguration) { try NotionPayload.batch(blocks, start: start) }
+        }
+        #expect(try NotionPayload.batch(blocks, start: blocks.count).isEmpty)
+    }
+    @Test func validNotionContinuationSendsAllRemainingText() async throws {
+        let prefix = String(repeating: "a", count: 2_000), remaining = String(repeating: "日", count: 2_001)
+        let page = UUID().uuidString
+        let writer = NotionWriter(http: MockProtocol.client { request in
+            #expect(request.httpMethod == "PATCH" && request.url?.path == "/v1/blocks/\(page)/children")
+            let body = try JSONSerialization.jsonObject(with: MockProtocol.body(request)) as! [String: Any]
+            let children = body["children"] as! [[String: Any]]
+            let text = children.map { child in
+                let paragraph = child["paragraph"] as! [String: Any]
+                let richText = paragraph["rich_text"] as! [[String: Any]]
+                return (richText[0]["text"] as! [String: String])["content"]!
+            }.joined()
+            #expect(children.count == 2 && text == remaining)
+            return .init(body: Data("{}".utf8))
+        }, token: { "unit-test-placeholder" })
+        var job = CloudJob(row: CaptureRow(screen: sample(prefix + remaining), previousWrittenAt: nil), destination: .notion, settings: AppSettings())
+        job.pageID = page; job.nextBlock = 1
+        #expect(try await writer.deliver(job) == nil)
+    }
     @Test func notionUnicodeChunkingAndBatching() throws {
         let text = String(repeating: "日本語🙂\n", count: 40_001)
         let chunks = TextChunks.split(text, limit: 2000)

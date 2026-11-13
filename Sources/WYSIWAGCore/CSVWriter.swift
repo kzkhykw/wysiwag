@@ -32,10 +32,10 @@ public actor CSVWriter {
             let url = folder.appendingPathComponent("wysiwag-\(row.day).csv")
             try CSVTransaction.withCSV(url) { fd in
                 for pending in try CSVTransaction.pending(in: journals) {
-                    let transaction: CSVTransaction
-                    do { transaction = try CSVTransaction.read(pending) }
+                    let transaction: CSVTransaction?
+                    do { transaction = try CSVTransaction.read(pending, forCSV: url) }
                     catch { if !FileManager.default.fileExists(atPath: pending.path) { continue }; throw error }
-                    if transaction.csvURL == url { try transaction.finish(at: pending, fd: fd) }
+                    if let transaction { try transaction.finish(at: pending, fd: fd) }
                 }
                 let size = lseek(fd, 0, SEEK_END)
                 let checkpoint = url.appendingPathExtension("offset")
