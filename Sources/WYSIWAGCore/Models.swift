@@ -57,18 +57,18 @@ public struct CaptureRow: Codable, Sendable, Equatable {
     }
 }
 
-public enum CaptureMode: String, Codable, CaseIterable, Sendable { case all = "ALL", smart = "SMART" }
+public enum CaptureMode: String, Codable, CaseIterable, Sendable { case all = "ALL", auto = "AUTO", smart = "SMART" }
 
 /// Deliberately contains no credentials. Only Keychain account names are used elsewhere.
 public struct AppSettings: Codable, Sendable, Equatable {
     public var interval: Double = 5
-    public var mode: CaptureMode = .smart
+    public var mode: CaptureMode = .auto
     public var similarityThreshold: Double = 0.90
-    public var jevEnabled = false
     public var jevProbabilityThreshold: Double = 0.5
     public var localFolder = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Documents/WYSIWAG").path
     public var notionEnabled = false
+    public var notionClientID = ""
     public var notionDatabaseID = ""
     public var notionDataSourceID = ""
     public var googleEnabled = false

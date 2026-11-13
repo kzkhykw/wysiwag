@@ -87,52 +87,60 @@ public actor JevClassifier: ScreenChangeClassifier {
     private let key: @Sendable () throws -> String?
     private let threshold: Double
     private var nextAttempt = Date.distantPast
+    private var failures = 0
+    private let endpoint: URL
+    public private(set) var lastFailure: SafeFailure?
 
     public init(http: HTTPClient = HTTPClient(), probabilityThreshold: Double = 0.5,
+                endpoint: URL = URL(string: "https://api.typesafe.ai/v1/systemone")!,
                 key: @escaping @Sendable () throws -> String? = { try KeychainStore().read(.jevKey) }) {
         self.http = http
         threshold = min(1, max(0, probabilityThreshold))
         self.key = key
+        self.endpoint = endpoint
     }
 
     public func classify(previous: ScreenSnapshot, current: ScreenSnapshot) async -> ChangeDecision {
-        guard Date() >= nextAttempt else { return .ambiguous }
+        guard Date() >= nextAttempt else { return .changed }
         do {
-            guard let key = try key(), !key.isEmpty else { return .ambiguous }
+            guard let key = try key(), !key.isEmpty else { throw SafeFailure.authentication }
             let body = try JSONEncoder().encode(JevRequest(previous: previous, current: current))
-            let request = HTTPClient.jsonRequest(url: URL(string: "https://api.typesafe.ai/v1/systemone")!, bearer: key, body: body)
+            let request = HTTPClient.jsonRequest(url: endpoint, bearer: key, body: body)
             let data = try await http.send(request)
             let result = try JSONDecoder().decode(JevResponse.self, from: data)
             guard let probability = result.answers["changed"]?.noul, probability.isFinite,
-                  (0...1).contains(probability) else { return .ambiguous }
+                  (0...1).contains(probability) else { throw SafeFailure.invalidResponse }
+            failures = 0; lastFailure = nil
             return probability >= threshold ? .changed : .unchanged
         } catch {
-            // Do not stall local capture while retrying a classifier. Respect Retry-After on
-            // subsequent ambiguous captures and fall back locally for this one.
+            failures += 1
+            lastFailure = error as? SafeFailure ?? .invalidResponse
+            let backoff = min(300, pow(2, Double(min(failures, 8))))
             if case let SafeFailure.http(status, retryAfter) = error {
-                let delay: Double = (status == 429 || status == 529) ? max(5, retryAfter ?? 30) : 300
+                let delay: Double = (status == 429 || status == 529) ? max(backoff, retryAfter ?? 5) : max(backoff, 30)
                 nextAttempt = Date().addingTimeInterval(delay)
-            } else { nextAttempt = Date().addingTimeInterval(30) }
-            return .ambiguous
+            } else { nextAttempt = Date().addingTimeInterval(backoff) }
+            return .changed
         }
     }
 }
 
 public struct SmartClassifier: ScreenChangeClassifier {
-    public let heuristic: HeuristicClassifier
-    public let remote: (any ScreenChangeClassifier)?
-    public init(heuristic: HeuristicClassifier = HeuristicClassifier(), remote: (any ScreenChangeClassifier)? = nil) {
-        self.heuristic = heuristic
+    public let remote: any ScreenChangeClassifier
+    public init(remote: any ScreenChangeClassifier) {
         self.remote = remote
     }
     public func classify(previous: ScreenSnapshot, current: ScreenSnapshot) async -> ChangeDecision {
-        let local = heuristic.decision(previous: previous, current: current)
-        guard local == .ambiguous else { return local }
-        if let remote {
-            let result = await remote.classify(previous: previous, current: current)
-            if result != .ambiguous { return result }
-        }
-        // Conservative fallback: retain ambiguous changes instead of dropping possible content.
-        return .changed
+        let result = await remote.classify(previous: previous, current: current)
+        return result == .ambiguous ? .changed : result
+    }
+}
+
+public struct AutoClassifier: ScreenChangeClassifier {
+    public let threshold: Double
+    public init(threshold: Double = 0.90) { self.threshold = min(1, max(0, threshold)) }
+    public func classify(previous: ScreenSnapshot, current: ScreenSnapshot) async -> ChangeDecision {
+        if previous.app != current.app || previous.bundleID != current.bundleID || previous.title != current.title { return .changed }
+        return HeuristicClassifier.similarity(TextNormalizer.normalize(previous.text), TextNormalizer.normalize(current.text)) < threshold ? .changed : .unchanged
     }
 }

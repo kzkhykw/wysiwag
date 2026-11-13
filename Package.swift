@@ -11,7 +11,7 @@ let package = Package(
         .executable(name: "wysiwag-cli", targets: ["WYSIWAGCLI"])
     ],
     targets: [
-        .target(name: "WYSIWAGCore", resources: [.copy("Resources/ocr-fixture.png")]),
+        .target(name: "WYSIWAGCore", resources: [.copy("Resources/ocr-fixture.png"), .copy("Resources/ocr-changed.png")]),
         .executableTarget(name: "WYSIWAGApp", dependencies: ["WYSIWAGCore"],
                           resources: [.process("Resources")]),
         .executableTarget(name: "WYSIWAGCLI", dependencies: ["WYSIWAGCore"]),

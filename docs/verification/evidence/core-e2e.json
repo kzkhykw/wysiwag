@@ -1,0 +1,24 @@
+{
+  "longText" : "passed",
+  "results" : [
+    {
+      "jevRequests" : 0,
+      "mode" : "ALL",
+      "outageRecovery" : "passed",
+      "rows" : 6
+    },
+    {
+      "jevRequests" : 0,
+      "mode" : "AUTO",
+      "outageRecovery" : "passed",
+      "rows" : 4
+    },
+    {
+      "jevRequests" : 6,
+      "mode" : "SMART",
+      "outageRecovery" : "passed",
+      "rows" : 4
+    }
+  ],
+  "retryAfter" : "passed"
+}

@@ -89,7 +89,7 @@ func sample(_ text: String = "Hello, world", app: String = "Editor", title: Stri
         #expect(heuristic.decision(previous: sample(""), current: sample("")) == .unchanged)
     }
 
-    @Test func jevEncodingResponseAndAmbiguousOnly() async throws {
+    @Test func jevEncodingResponseAndNoPrefilter() async throws {
         let client = MockProtocol.client { request in
             #expect(request.url?.absoluteString == "https://api.typesafe.ai/v1/systemone")
             #expect(request.httpMethod == "POST")
@@ -105,7 +105,7 @@ func sample(_ text: String = "Hello, world", app: String = "Editor", title: Stri
         let strict = JevClassifier(http: client, probabilityThreshold: 0.8, key: { "unit-test-placeholder" })
         #expect(await strict.classify(previous: sample(), current: sample("changed")) == .unchanged)
         let smart = SmartClassifier(remote: jev)
-        #expect(await smart.classify(previous: sample(), current: sample()) == .unchanged)
+        #expect(await smart.classify(previous: sample(), current: sample()) == .changed)
         let request = JevRequest(previous: sample(String(repeating: "日本語", count: 50_000)), current: sample())
         #expect(request.state.previous.text.utf8.count <= 22_000)
         #expect(request.state.previous.text.hasSuffix("[Truncated for context limit]"))

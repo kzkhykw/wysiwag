@@ -1,2 +1,0 @@
-import WYSIWAGCore
-print("WYSIWAG")

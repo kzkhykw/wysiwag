@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 public enum SecretAccount: String, Sendable, CaseIterable {
-    case jevKey, notionToken, googleRefreshToken, googleClientSecret
+    case jevKey, notionClientSecret, notionAccessToken, googleRefreshToken, googleClientSecret
 }
 
 public struct KeychainStore: Sendable {
