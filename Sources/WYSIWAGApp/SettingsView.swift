@@ -185,6 +185,14 @@ struct SettingsView: View {
                     Text(t("Pending") + ": \(model.pending) · " + t("Needs attention") + ": \(model.blocked)")
                     Spacer(); Button(t("Retry blocked writes")) { model.retryQueue() }
                 }
+                if model.recovering > 0 {
+                    Text(t("Unresolved local writes") + ": \(model.recovering)")
+                    Text(t("Restore access to the CSV folder to finish recovery. Other cloud writes continue.")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                if model.quarantined > 0 {
+                    Text(t("Quarantined files") + ": \(model.quarantined)").accessibilityIdentifier("quarantine-status")
+                    Text(t("Malformed queue files are kept in Outbox/Quarantine; other writes continue.")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 Text(t("Failed writes stay on this Mac. Disabled destinations stop sending queued rows.")).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

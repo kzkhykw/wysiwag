@@ -146,7 +146,7 @@ extension CoreTests {
         let baseline = sample()
         #expect(try await first.record(baseline, settings: settings, classifier: AutoClassifier()))
         #expect(try await !first.record(sample(date: baseline.timestamp.addingTimeInterval(5)), settings: settings, classifier: AutoClassifier()))
-        let second = CaptureRecorder(csv: CSVWriter(folder: folder), queue: queue, previous: await first.lastWrittenScreen())
+        let second = CaptureRecorder(csv: CSVWriter(folder: folder), queue: queue, previous: try await first.lastWrittenScreen())
         #expect(try await second.record(sample("Entirely changed", date: baseline.timestamp.addingTimeInterval(10)), settings: settings, classifier: AutoClassifier()))
         let file = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).first { $0.pathExtension == "csv" }!
         #expect(try String(contentsOf: file, encoding: .utf8).hasSuffix(",10.000\r\n"))

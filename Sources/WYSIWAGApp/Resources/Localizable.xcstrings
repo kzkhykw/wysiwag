@@ -801,6 +801,22 @@
         }
       }
     },
+    "Malformed queue files are kept in Outbox/Quarantine; other writes continue.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Malformed queue files are kept in Outbox/Quarantine; other writes continue."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み取れないキューファイルはOutbox/Quarantineに保持します。他の送信は続行します。"
+          }
+        }
+      }
+    },
     "Needs attention": {
       "localizations": {
         "en": {
@@ -1153,6 +1169,22 @@
         }
       }
     },
+    "Quarantined files": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quarantined files"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隔離したファイル"
+          }
+        }
+      }
+    },
     "Quit WYSIWAG": {
       "localizations": {
         "en": {
@@ -1261,6 +1293,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "画面収録を許可した後、WYSIWAGを再起動してください。"
+          }
+        }
+      }
+    },
+    "Restore access to the CSV folder to finish recovery. Other cloud writes continue.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore access to the CSV folder to finish recovery. Other cloud writes continue."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CSVフォルダへのアクセスを復元すると復旧を再試行します。他のクラウド送信は継続します。"
           }
         }
       }
@@ -1693,6 +1741,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "TypeSafe APIキー"
+          }
+        }
+      }
+    },
+    "Unresolved local writes": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unresolved local writes"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未解決のローカル書き込み"
           }
         }
       }

@@ -14,38 +14,81 @@ public enum CSV {
 
 public actor CSVWriter {
     public let folder: URL
+    private var unsettled: (transaction: CSVTransaction, journal: URL)?
     public init(folder: URL) { self.folder = folder }
 
-    public func append(_ row: CaptureRow) throws {
+    /// Reconcile an uncertain append before the live recorder compares its next screen.
+    public func reconcile() throws -> ScreenSnapshot? {
+        guard let pending = unsettled else { return nil }
+        try CSVTransaction.recover(pending.journal)
+        unsettled = nil
+        return pending.transaction.row.screen
+    }
+
+    public func append(_ row: CaptureRow, jobs: [CloudJob] = [], outbox: URL? = nil) throws {
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
-                                                   attributes: [.posixPermissions: 0o700])
+            _ = try reconcile()
+            let journals = outbox ?? folder.appendingPathComponent(".wysiwag-journal")
             let url = folder.appendingPathComponent("wysiwag-\(row.day).csv")
-            let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0o600)
-            guard fd >= 0 else { throw SafeFailure.localWrite }
-            defer { close(fd) }
-            guard flock(fd, LOCK_EX) == 0 else { throw SafeFailure.localWrite }
-            defer { flock(fd, LOCK_UN) }
-            let originalSize = lseek(fd, 0, SEEK_END)
-            guard originalSize >= 0 else { throw SafeFailure.localWrite }
-            let data = Data(((originalSize == 0 ? CSV.header : "") + CSV.encode(row)).utf8)
-            do {
-                try data.withUnsafeBytes { buffer in
-                    var offset = 0
-                    while offset < buffer.count {
-                        let written = write(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
-                        if written < 0 && errno == EINTR { continue }
-                        guard written > 0 else { throw SafeFailure.localWrite }
-                        offset += written
-                    }
+            try CSVTransaction.withCSV(url) { fd in
+                for pending in try CSVTransaction.pending(in: journals) {
+                    let transaction: CSVTransaction
+                    do { transaction = try CSVTransaction.read(pending) }
+                    catch { if !FileManager.default.fileExists(atPath: pending.path) { continue }; throw error }
+                    if transaction.csvURL == url { try transaction.finish(at: pending, fd: fd) }
                 }
-                guard fsync(fd) == 0 else { throw SafeFailure.localWrite }
-            } catch {
-                // Roll back a partial row so the next launch does not append onto corrupt CSV.
-                _ = ftruncate(fd, originalSize)
-                _ = fsync(fd)
-                throw SafeFailure.localWrite
+                let size = lseek(fd, 0, SEEK_END)
+                let checkpoint = url.appendingPathExtension("offset")
+                let committed: Int64
+                if let data = try? Data(contentsOf: checkpoint), let offset = try? JSONDecoder().decode(Int64.self, from: data), offset >= 0, offset <= size {
+                    committed = offset
+                } else {
+                    // Import/recover a legacy file once, respecting quoted multiline records.
+                    committed = try Self.completePrefix(Data(contentsOf: url))
+                }
+                guard ftruncate(fd, committed) == 0 else { throw SafeFailure.localWrite }
+                try DurableFile.sync(fd)
+                let transaction = CSVTransaction(id: UUID(), csvURL: url, offset: committed, row: row,
+                    bytes: Data(((committed == 0 ? CSV.header : "") + CSV.encode(row)).utf8), jobs: jobs)
+                let journal = journals.appendingPathComponent(transaction.id.uuidString + ".txn")
+                do { try DurableFile.replace(JSONEncoder().encode(transaction), at: journal) }
+                catch {
+                    // A directory-flush failure can occur after the journal was renamed.
+                    if FileManager.default.fileExists(atPath: journal.path) { unsettled = (transaction, journal) }
+                    throw error
+                }
+                unsettled = (transaction, journal)
+                // From this point, errors/cancellation leave a recoverable transaction, not a partial CSV.
+                try transaction.finish(at: journal, fd: fd)
+                unsettled = nil
             }
         } catch { throw SafeFailure.localWrite }
+    }
+
+    static func completePrefix(_ data: Data) throws -> Int64 {
+        let header = Data(CSV.header.utf8)
+        if data.count < header.count {
+            guard header.starts(with: data) else { throw SafeFailure.localWrite }
+            return 0
+        }
+        guard data.starts(with: header) else { throw SafeFailure.localWrite }
+        enum State { case start, plain, quoted, endQuote }
+        var state = State.start, fields = 1, last = header.count, i = header.count
+        let bytes = Array(data)
+        while i < bytes.count {
+            let byte = bytes[i]
+            if state == .quoted {
+                if byte == 34 { state = .endQuote }
+            } else if state == .endQuote && byte == 34 { state = .quoted }
+            else if byte == 44 { fields += 1; state = .start }
+            else if byte == 13 && i + 1 < bytes.count && bytes[i + 1] == 10 {
+                guard fields == 5 else { return Int64(last) }
+                i += 1; last = i + 1; fields = 1; state = .start
+            } else if byte == 34 && state == .start { state = .quoted }
+            else if state == .endQuote || byte == 34 || byte == 10 || byte == 13 { return Int64(last) }
+            else { state = .plain }
+            i += 1
+        }
+        return Int64(last)
     }
 }

@@ -95,7 +95,7 @@ public struct AppSettings: Codable, Sendable, Equatable {
     }
 }
 
-public enum SafeFailure: Error, Sendable, Equatable {
+public enum SafeFailure: Error, Sendable, Equatable, Codable {
     case permission, noWindow, privacySkip, capture, localWrite, queueWrite, invalidConfiguration
     case keychain(Int32), network, invalidResponse, authentication, cancelled
     case http(Int, retryAfter: Double?)

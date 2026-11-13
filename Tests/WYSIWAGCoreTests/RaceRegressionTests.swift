@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import WYSIWAGCore
 
-private final class ResponseGate: @unchecked Sendable {
+final class ResponseGate: @unchecked Sendable {
     private let condition = NSCondition()
     private var started = false
     private var released = false
@@ -23,7 +23,7 @@ private final class ResponseGate: @unchecked Sendable {
     }
 }
 
-private final class TestClock: @unchecked Sendable {
+final class TestClock: @unchecked Sendable {
     private let lock = NSLock()
     private var value = Date(timeIntervalSince1970: 1_800_000_000)
     func now() -> Date { lock.withLock { value } }

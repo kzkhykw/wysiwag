@@ -85,23 +85,43 @@ public struct JevResponse: Decodable, Sendable {
 public actor JevClassifier: ScreenChangeClassifier {
     private let http: HTTPClient
     private let key: @Sendable () throws -> String?
-    private let threshold: Double
+    private var threshold: Double
     private var nextAttempt = Date.distantPast
     private var failures = 0
     private let endpoint: URL
     public private(set) var lastFailure: SafeFailure?
+    private struct Cooldown: Codable { let nextAttempt: Date; let failures: Int; let failure: SafeFailure? }
+    private let stateURL: URL?
+    private let clock: @Sendable () -> Date
+    private var restored = false
+    public func setThreshold(_ value: Double) { threshold = min(1, max(0, value)) }
+    private func restore() throws {
+        guard !restored else { return }
+        if let stateURL, FileManager.default.fileExists(atPath: stateURL.path) {
+            let saved = try JSONDecoder().decode(Cooldown.self, from: Data(contentsOf: stateURL))
+            nextAttempt = saved.nextAttempt; failures = saved.failures; lastFailure = saved.failure
+        }
+        restored = true
+    }
+    private func persist() throws {
+        if let stateURL {
+            try DurableFile.replace(JSONEncoder().encode(Cooldown(nextAttempt: nextAttempt, failures: failures, failure: lastFailure)), at: stateURL)
+        }
+    }
 
     public init(http: HTTPClient = HTTPClient(), probabilityThreshold: Double = 0.5,
                 endpoint: URL = URL(string: "https://api.typesafe.ai/v1/systemone")!,
+                stateURL: URL? = nil, clock: @escaping @Sendable () -> Date = { Date() },
                 key: @escaping @Sendable () throws -> String? = { try KeychainStore().read(.jevKey) }) {
-        self.http = http
+        self.http = http; self.stateURL = stateURL; self.clock = clock
         threshold = min(1, max(0, probabilityThreshold))
         self.key = key
         self.endpoint = endpoint
     }
 
     public func classify(previous: ScreenSnapshot, current: ScreenSnapshot) async -> ChangeDecision {
-        guard Date() >= nextAttempt else { return .changed }
+        do { try restore() } catch { lastFailure = .localWrite; return .changed }
+        guard clock() >= nextAttempt else { return .changed }
         do {
             guard let key = try key(), !key.isEmpty else { throw SafeFailure.authentication }
             let body = try JSONEncoder().encode(JevRequest(previous: previous, current: current))
@@ -110,7 +130,8 @@ public actor JevClassifier: ScreenChangeClassifier {
             let result = try JSONDecoder().decode(JevResponse.self, from: data)
             guard let probability = result.answers["changed"]?.noul, probability.isFinite,
                   (0...1).contains(probability) else { throw SafeFailure.invalidResponse }
-            failures = 0; lastFailure = nil
+            failures = 0; lastFailure = nil; nextAttempt = .distantPast
+            try persist()
             return probability >= threshold ? .changed : .unchanged
         } catch {
             failures += 1
@@ -118,8 +139,9 @@ public actor JevClassifier: ScreenChangeClassifier {
             let backoff = min(300, pow(2, Double(min(failures, 8))))
             if case let SafeFailure.http(status, retryAfter) = error {
                 let delay: Double = (status == 429 || status == 529) ? max(backoff, retryAfter ?? 5) : max(backoff, 30)
-                nextAttempt = Date().addingTimeInterval(delay)
-            } else { nextAttempt = Date().addingTimeInterval(backoff) }
+                nextAttempt = clock().addingTimeInterval(delay)
+            } else { nextAttempt = clock().addingTimeInterval(backoff) }
+            do { try persist() } catch { lastFailure = .localWrite }
             return .changed
         }
     }
