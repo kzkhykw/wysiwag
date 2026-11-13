@@ -22,7 +22,7 @@ The [dated follow-up report](followup-2026-11-14.json) records current results, 
 | English/Japanese visual QA | **2026-11-13**: reviewed, no clipping in Capture settings | [English](../../screenshots/settings-en.png), [Japanese](../../screenshots/settings-ja.png) |
 | Missing cloud configuration / privacy defaults | **2026-11-13**: local always on; unconfigured cloud toggles disabled; exclusion/idle controls present | [Destinations](destinations-en.png), [Privacy](privacy-en.png) |
 | Japanese destination scrolling | **2026-11-13**: Google setup and retry controls remain visible and readable at the bottom | [Japanese destinations](destinations-ja-bottom.png) |
-| ALL / AUTO live capture | **2026-11-13 blocked:** Screen Recording denied** for both attempts; no live rows claimed | [Permission state](permission-state.png), [UI report](app-e2e.json) |
+| ALL / AUTO live capture | **2026-11-13 blocked: Screen Recording denied** for both attempts; no live rows claimed | [Permission state](permission-state.png), [UI report](app-e2e.json) |
 | Secrets / localization | Repository and built binaries scanned; all 113 catalog strings have English and Japanese | [Checks](../../../scripts/check-no-secrets.py), [catalog check](../../../scripts/check-localization.py) |
 
 The CLI fallback command is `swift run wysiwag-cli capture --once --dry-run`. It proves actual on-device OCR of the bundled image, not live screen permission. Real cloud authentication/writes and provider-console registration are not represented by mock tests.
