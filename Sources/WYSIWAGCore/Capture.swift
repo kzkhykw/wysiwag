@@ -1,5 +1,6 @@
 import AppKit
-import ScreenCaptureKit
+// Older SDKs lack Sendable annotations; framework objects remain confined to ScreenCapture.
+@preconcurrency import ScreenCaptureKit
 import Vision
 import ApplicationServices
 import Carbon

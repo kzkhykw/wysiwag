@@ -14,3 +14,5 @@ The primary implementation session fixed each finding. The reviewer then re-read
 Re-verification after fixes: `scripts/verify.sh` passed with 24 tests, full core E2E, strict signed-app verification, packaged OCR and scans. Real app E2E was rerun on that release build. The OAuth races, delayed Retry-After, fixed-port reconnect and target clearing are now executable regression checks.
 
 Limits retained explicitly: cloud delivery is at least once; a crash between CSV flush and outbox persistence can leave a local-only row; Screen Recording was denied; real provider consent/writes and Notion portal registration were not exercised. These are documented in the README and draft PR rather than represented as successful live verification.
+
+CI follow-up: Xcode 16.4's SDK lacks the newer ScreenCaptureKit Sendable annotations. The reviewer separately checked the `@preconcurrency` import compatibility change and found no new isolation issue: capture framework objects stay local to each actor invocation, configuration is not mutated after dispatch, and only `ScreenSnapshot` leaves the actor. Hosted CI supplies older-SDK compilation coverage.

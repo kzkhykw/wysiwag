@@ -16,6 +16,7 @@ Only synthetic fixture content is used in committed evidence. Amendment 1 supers
 | App QA 1 | Long Japanese help text needed wrapping; buttons needed AX labels | Vertical text wrapping and localized accessibility labels; visual review and UI rerun | Passed |
 | App QA 1 | Incomplete enabled cloud configuration could create unusable jobs | Guard settings saves; disable unconfigured destination toggles; UI assertions | Passed |
 | Retry QA 1 | Destination Retry-After existed only in memory | Persist cooldowns and test a new queue instance before expiry | Passed |
+| CI 1 | Xcode 16.4's ScreenCaptureKit headers lack Sendable annotations present in the local SDK | Import the legacy framework with @preconcurrency; framework objects stay confined to the capture actor; retain hosted older-SDK build coverage | Local rerun passed; hosted result in PR checks |
 
 ## Complete verification pass after fixes
 
