@@ -98,8 +98,13 @@ public actor ScreenCapture {
 }
 
 public enum OCR {
-    public static var fixtureURL: URL { Bundle.module.url(forResource: "ocr-fixture", withExtension: "png")! }
-    public static var changedFixtureURL: URL { Bundle.module.url(forResource: "ocr-changed", withExtension: "png")! }
+    private static var resources: Bundle {
+        if let base = Bundle.main.resourceURL,
+           let packaged = Bundle(url: base.appendingPathComponent("WYSIWAG_WYSIWAGCore.bundle")) { return packaged }
+        return Bundle.module
+    }
+    public static var fixtureURL: URL { resources.url(forResource: "ocr-fixture", withExtension: "png")! }
+    public static var changedFixtureURL: URL { resources.url(forResource: "ocr-changed", withExtension: "png")! }
     public static func recognize(file: URL) throws -> String {
         guard let source = CGImageSourceCreateWithURL(file as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw SafeFailure.capture }
         return try recognize(image)

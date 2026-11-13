@@ -23,13 +23,13 @@ public struct CloudJob: Codable, Sendable, Identifiable {
         target = destination == .notion ? settings.notionDatabaseID : settings.spreadsheetID
         dataSourceID = settings.notionDataSourceID
         sheetName = settings.sheetName
-        clientID = settings.googleClientID
+        clientID = destination == .notion ? settings.notionClientID : settings.googleClientID
     }
 
     public func isEnabled(in settings: AppSettings) -> Bool {
         switch destination {
         case .notion:
-            settings.notionEnabled && target == settings.notionDatabaseID && dataSourceID == settings.notionDataSourceID
+            settings.notionEnabled && target == settings.notionDatabaseID && dataSourceID == settings.notionDataSourceID && clientID == settings.notionClientID
         case .sheets:
             settings.googleEnabled && target == settings.spreadsheetID && sheetName == settings.sheetName && clientID == settings.googleClientID
         }
@@ -104,23 +104,34 @@ public enum NotionPayload {
 
 public actor NotionWriter: CloudWriting {
     private let http: HTTPClient
-    private let token: @Sendable () throws -> String?
+    private let token: @Sendable () async throws -> String?
+    private let refresh: (@Sendable () async throws -> Void)?
     private struct Schema { let source: String; let appIsSelect: Bool }
     private var schemas: [String: Schema] = [:]
 
     private let baseURL: URL
-    public init(http: HTTPClient = HTTPClient(), baseURL: URL = URL(string: "https://api.notion.com/v1/")!, token: @escaping @Sendable () throws -> String? = { try KeychainStore().read(.notionAccessToken) }) {
-        self.http = http; self.token = token; self.baseURL = baseURL
+    public init(http: HTTPClient = HTTPClient(), baseURL: URL = URL(string: "https://api.notion.com/v1/")!,
+                refresh: (@Sendable () async throws -> Void)? = nil,
+                token: @escaping @Sendable () async throws -> String?) {
+        self.http = http; self.token = token; self.baseURL = baseURL; self.refresh = refresh
     }
 
     private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil) async throws -> [String: Any] {
-        guard let token = try token(), !token.isEmpty else { throw SafeFailure.authentication }
+        guard let token = try await token(), !token.isEmpty else { throw SafeFailure.authentication }
         let url = baseURL.appendingPathComponent(path)
         var request = HTTPClient.jsonRequest(url: url, method: method, bearer: token,
                                             body: try body.map { try JSONSerialization.data(withJSONObject: $0) } ?? Data())
         if body == nil { request.httpBody = nil }
         request.setValue(NotionPayload.version, forHTTPHeaderField: "Notion-Version")
-        let data = try await http.send(request)
+        let data: Data
+        do { data = try await http.send(request) }
+        catch SafeFailure.http(401, _) {
+            guard let refresh else { throw SafeFailure.authentication }
+            try await refresh()
+            guard let refreshed = try await self.token() else { throw SafeFailure.authentication }
+            request.setValue("Bearer " + refreshed, forHTTPHeaderField: "Authorization")
+            data = try await http.send(request)
+        }
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw SafeFailure.invalidResponse }
         return object
     }

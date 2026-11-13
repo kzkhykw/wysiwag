@@ -13,15 +13,35 @@ public actor RetryQueue {
     private let sheets: any CloudWriting
     private var draining = false
     private var cooldowns: [CloudDestination: Date] = [:]
+    private let clock: @Sendable () -> Date
 
-    public init(folder: URL, notion: any CloudWriting, sheets: any CloudWriting) {
-        self.folder = folder; self.notion = notion; self.sheets = sheets
+    public init(folder: URL, notion: any CloudWriting, sheets: any CloudWriting,
+                clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.folder = folder; self.notion = notion; self.sheets = sheets; self.clock = clock
     }
 
     private func files() throws -> [URL] {
         if !FileManager.default.fileExists(atPath: folder.path) { return [] }
         return try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+    private func restoreCooldowns() throws {
+        let url = folder.appendingPathComponent("cooldowns.state")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let saved = try JSONDecoder().decode([String: Date].self, from: Data(contentsOf: url))
+            for (name, date) in saved {
+                if let destination = CloudDestination(rawValue: name) {
+                    cooldowns[destination] = max(cooldowns[destination] ?? .distantPast, date)
+                }
+            }
+        } catch { throw SafeFailure.queueWrite }
+    }
+    private func saveCooldowns() throws {
+        do {
+            let saved = Dictionary(uniqueKeysWithValues: cooldowns.map { ($0.key.rawValue, $0.value) })
+            try JSONEncoder().encode(saved).write(to: folder.appendingPathComponent("cooldowns.state"), options: .atomic)
+        } catch { throw SafeFailure.queueWrite }
     }
     private func read(_ url: URL) throws -> CloudJob {
         do { return try JSONDecoder().decode(CloudJob.self, from: Data(contentsOf: url)) }
@@ -60,9 +80,11 @@ public actor RetryQueue {
         }
     }
 
-    public func drain(settings: AppSettings, now: Date = Date()) async throws {
+    public func drain(settings: AppSettings, now: Date? = nil) async throws {
         guard !draining else { return }
         draining = true; defer { draining = false }
+        let started = clock(), now = now ?? clock()
+        try restoreCooldowns()
         var processed = 0
         for url in try files() {
             try Task.checkCancellation()
@@ -78,13 +100,15 @@ public actor RetryQueue {
             } catch {
                 if case SafeFailure.queueWrite = error { throw error }
                 if Task.isCancelled { return }
+                let responseTime = now.addingTimeInterval(max(0, clock().timeIntervalSince(started)))
                 job.attempts += 1
                 var delay = min(3600, pow(2, Double(min(job.attempts, 11))))
                 if case let SafeFailure.http(status, retryAfter) = error {
                     job.lastStatus = status
                     if status == 429 || status == 529 {
                         delay = max(delay, retryAfter ?? 30)
-                        cooldowns[job.destination] = now.addingTimeInterval(delay)
+                        cooldowns[job.destination] = responseTime.addingTimeInterval(delay)
+                        try saveCooldowns()
                     } else if (400..<500).contains(status) && status != 408 {
                         job.blocked = true
                     }
@@ -92,7 +116,7 @@ public actor RetryQueue {
                     job.blocked = true
                 }
                 if job.attempts >= 12 { job.blocked = true }
-                job.nextAttempt = now.addingTimeInterval(delay)
+                job.nextAttempt = responseTime.addingTimeInterval(delay)
                 try save(job)
             }
             processed += 1
@@ -106,6 +130,10 @@ public actor CaptureRecorder {
     private let csv: CSVWriter
     private let queue: RetryQueue
     public init(csv: CSVWriter, queue: RetryQueue) { self.csv = csv; self.queue = queue }
+    public init(csv: CSVWriter, queue: RetryQueue, previous: ScreenSnapshot?) {
+        self.csv = csv; self.queue = queue; self.previous = previous
+    }
+    public func lastWrittenScreen() -> ScreenSnapshot? { previous }
 
     public func record(_ screen: ScreenSnapshot, settings: AppSettings, classifier: any ScreenChangeClassifier) async throws -> Bool {
         if settings.mode != .all {

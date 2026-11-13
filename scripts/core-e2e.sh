@@ -21,9 +21,20 @@ for mode, expected in [('ALL', 6), ('AUTO', 4), ('SMART', 4)]:
     assert [float(row['dwell_seconds']) for row in rows[1:]]==([5]*5 if mode=='ALL' else [10,5,5])
     assert '日本語' in rows[0]['visible_text']
     assert not list((root/mode/'outbox').glob('*.json'))
+    if mode=='ALL':
+        evidence=pathlib.Path('docs/verification/evidence')
+        evidence.mkdir(parents=True,exist_ok=True)
+        with (evidence/'fixture-csv-head.csv').open('w',newline='') as stream:
+            writer=csv.DictWriter(stream,fieldnames=list(rows[0]))
+            writer.writeheader()
+            for row in rows[:5]:
+                if len(row['visible_text'])>80:
+                    row['visible_text']=row['visible_text'][:80]+' [preview truncated]'
+                writer.writerow(row)
 print('PASS: independent CSV parser, exact dwell times, bilingual text and empty durable queues')
 PY
 if [ -s "$run_dir/mock.log" ]; then cat "$run_dir/mock.log"; exit 1; fi
 mkdir -p docs/verification/evidence
 cp "$run_dir/output/core-e2e.json" docs/verification/evidence/core-e2e.json
+.build/debug/wysiwag-cli capture --once --dry-run > docs/verification/evidence/ocr-dry-run.csv
 printf 'Evidence: %s\n' "$run_dir/output"

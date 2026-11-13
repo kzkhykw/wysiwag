@@ -43,14 +43,18 @@ public final class OAuthLoopback: @unchecked Sendable {
     private var cancelled = false
     private var started = false
 
-    public init() throws {
+    public init(port: UInt16 = 0, host: String = "127.0.0.1") throws {
         let socketFD = socket(AF_INET, SOCK_STREAM, 0)
         guard socketFD >= 0 else { throw SafeFailure.authentication }
         fd = socketFD
+        var reuse: Int32 = 1
+        guard setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            close(socketFD); throw SafeFailure.authentication
+        }
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = 0
+        address.sin_port = port.bigEndian
         address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
         let result = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
@@ -62,7 +66,7 @@ public final class OAuthLoopback: @unchecked Sendable {
         }
         guard name == 0 else { close(fd); throw SafeFailure.authentication }
         _ = fcntl(fd, F_SETFL, O_NONBLOCK)
-        redirectURI = "http://127.0.0.1:\(UInt16(bigEndian: address.sin_port))/oauth/callback"
+        redirectURI = "http://\(host):\(UInt16(bigEndian: address.sin_port))/oauth/callback"
     }
     deinit { close(fd) }
     public func cancel() { lock.withLock { cancelled = true } }
@@ -80,16 +84,16 @@ public final class OAuthLoopback: @unchecked Sendable {
         return code
     }
 
-    public func code(expectedState: String) async throws -> String {
+    public func code(expectedState: String, timeout: Double = 180) async throws -> String {
         guard lock.withLock({ if started { return false }; started = true; return true }) else { throw SafeFailure.authentication }
-        let worker = Task.detached { [self] in try receive(expectedState: expectedState) }
+        let worker = Task.detached { [self] in try receive(expectedState: expectedState, timeout: timeout) }
         return try await withTaskCancellationHandler {
             try await worker.value
         } onCancel: { self.cancel() }
     }
 
-    private func receive(expectedState: String) throws -> String {
-        let deadline = Date().addingTimeInterval(180)
+    private func receive(expectedState: String, timeout: Double) throws -> String {
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if lock.withLock({ cancelled }) { throw SafeFailure.cancelled }
             var readiness = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
@@ -97,6 +101,8 @@ public final class OAuthLoopback: @unchecked Sendable {
             let connection = accept(fd, nil, nil)
             guard connection >= 0 else { continue }
             defer { close(connection) }
+            // Darwin inherits O_NONBLOCK from the listener; wait for the actual HTTP bytes.
+            _ = fcntl(connection, F_SETFL, fcntl(connection, F_GETFL) & ~O_NONBLOCK)
             var timeout = timeval(tv_sec: 1, tv_usec: 0)
             _ = setsockopt(connection, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
             var noSignal: Int32 = 1
@@ -128,11 +134,16 @@ public actor GoogleOAuth {
     private let http: HTTPClient
     private let keychain: KeychainStore
     private var cached: (clientID: String, token: String, expiry: Date)?
+    private var generation = 0
     public init(http: HTTPClient = HTTPClient(), keychain: KeychainStore = KeychainStore()) {
         self.http = http; self.keychain = keychain
     }
-    public func invalidate() { cached = nil }
-    public func signOut() throws { cached = nil; try keychain.delete(.googleRefreshToken) }
+    public func invalidate() { generation += 1; cached = nil }
+    public func signOut() throws { invalidate(); try keychain.delete(.googleRefreshToken) }
+    private func requireCurrent(_ expected: Int) throws {
+        try Task.checkCancellation()
+        guard generation == expected else { throw SafeFailure.cancelled }
+    }
 
     private func exchange(_ fields: [String: String]) async throws -> TokenResponse {
         var fields = fields
@@ -147,6 +158,7 @@ public actor GoogleOAuth {
     }
 
     public func authorize(clientID: String, openBrowser: @Sendable (URL) async -> Bool) async throws {
+        let expected = generation
         guard clientID.hasSuffix(".apps.googleusercontent.com") else { throw SafeFailure.invalidConfiguration }
         let listener = try OAuthLoopback()
         defer { listener.cancel() }
@@ -154,9 +166,10 @@ public actor GoogleOAuth {
         let url = PKCE.authorizationURL(clientID: clientID, redirect: listener.redirectURI, state: state, verifier: verifier)
         guard await openBrowser(url) else { throw SafeFailure.authentication }
         let code = try await listener.code(expectedState: state)
-        try Task.checkCancellation()
+        try requireCurrent(expected)
         let result = try await exchange(["client_id": clientID, "code": code, "code_verifier": verifier,
                                          "redirect_uri": listener.redirectURI, "grant_type": "authorization_code"])
+        try requireCurrent(expected)
         guard let refresh = result.refresh_token, !refresh.isEmpty else { throw SafeFailure.authentication }
         let stored = try JSONEncoder().encode(StoredRefresh(clientID: clientID, refreshToken: refresh))
         try keychain.set(String(decoding: stored, as: UTF8.self), for: .googleRefreshToken)
@@ -164,11 +177,13 @@ public actor GoogleOAuth {
     }
 
     public func accessToken(clientID: String) async throws -> String {
+        let expected = generation
         if let cached, cached.clientID == clientID, cached.expiry > Date() { return cached.token }
         guard let raw = try keychain.read(.googleRefreshToken),
               let stored = try? JSONDecoder().decode(StoredRefresh.self, from: Data(raw.utf8)),
               stored.clientID == clientID else { throw SafeFailure.authentication }
         let result = try await exchange(["client_id": clientID, "refresh_token": stored.refreshToken, "grant_type": "refresh_token"])
+        try requireCurrent(expected)
         cached = (clientID, result.access_token, Date().addingTimeInterval(max(0, (result.expires_in ?? 3600) - 60)))
         if let rotated = result.refresh_token {
             let data = try JSONEncoder().encode(StoredRefresh(clientID: clientID, refreshToken: rotated))

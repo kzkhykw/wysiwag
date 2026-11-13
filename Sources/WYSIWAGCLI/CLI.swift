@@ -5,6 +5,9 @@ import WYSIWAGCore
     static func main() async {
         do {
             switch CommandLine.arguments.dropFirst().first {
+            case "check-packaged-resources":
+                guard OCR.fixtureURL.path.contains(".app/"), try OCR.recognize(file: OCR.fixtureURL).contains("日本語") else { throw SafeFailure.invalidConfiguration }
+                print("PASS: packaged resources and bilingual OCR")
             case "verify": try await VerificationDriver.run()
             case "capture": try await capture()
             default: print("Usage: wysiwag-cli capture --once --dry-run [--live | --image PATH]\n       wysiwag-cli verify --mock-base http://127.0.0.1:PORT --output PATH")

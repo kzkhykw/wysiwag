@@ -81,6 +81,12 @@ public struct AppSettings: Codable, Sendable, Equatable {
     public var language = "system"
     public init() {}
 
+    public mutating func selectNotionDatabase(_ database: NotionDatabase?) {
+        notionDatabaseID = database?.databaseID ?? ""
+        notionDataSourceID = database?.id ?? ""
+        if database == nil { notionEnabled = false }
+    }
+
     public mutating func validate() {
         interval = interval.isFinite ? min(3600, max(1, interval)) : 5
         idleMinutes = idleMinutes.isFinite ? min(240, max(1, idleMinutes)) : 5
