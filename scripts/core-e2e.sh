@@ -1,13 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-swift build
+swift build "$@"
 evidence_dir=${WYSIWAG_EVIDENCE_DIR:-"$PWD/.build/verification"}
 mkdir -p "$evidence_dir"
 run_dir=$(mktemp -d "${TMPDIR:-/tmp}/wysiwag-e2e.XXXXXX")
 python3 scripts/mock-services.py --port-file "$run_dir/port" > "$run_dir/mock.log" 2>&1 &
 mock_pid=$!
-trap 'kill "$mock_pid" 2>/dev/null || true' EXIT
+cleanup() {
+    kill "$mock_pid" 2>/dev/null || true
+    wait "$mock_pid" 2>/dev/null || true
+    rm -rf "$run_dir"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 for _ in {1..50}; do [ -s "$run_dir/port" ] && break; sleep 0.1; done
 port=$(cat "$run_dir/port")
 .build/debug/wysiwag-cli verify --mock-base "http://127.0.0.1:$port" --output "$run_dir/output"
