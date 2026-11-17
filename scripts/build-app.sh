@@ -2,8 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 configuration=${CONFIGURATION:-release}
-swift build -c "$configuration"
-bin_dir=$(swift build -c "$configuration" --show-bin-path)
+swift build -c "$configuration" "$@"
+bin_dir=$(swift build -c "$configuration" --show-bin-path "$@")
 app="$PWD/dist/WYSIWAG.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

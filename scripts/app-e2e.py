@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
 """Drive the actual app through macOS accessibility; never reads a credential value."""
-import json, pathlib, plistlib, subprocess, sys, time, uuid
+import json, os, pathlib, plistlib, signal, subprocess, sys, time, uuid
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 APP=ROOT/'dist/WYSIWAG.app'
-EVIDENCE=ROOT/'docs/verification/evidence'
-SCREENSHOTS=ROOT/'docs/screenshots'
+EVIDENCE=pathlib.Path(os.environ.get('WYSIWAG_EVIDENCE_DIR', ROOT/'.build/verification'))
+SCREENSHOTS=EVIDENCE/'screenshots'
 TEST_OUTBOX=pathlib.Path.home()/'Library/Application Support/WYSIWAG-Evidence/Outbox'
 BAD_JOB=str(uuid.uuid4())+'-e2e-malformed.json'
-ATTEMPT=ROOT/'.build/verification/app-e2e-attempt.json'
+ATTEMPT=EVIDENCE/'app-e2e-attempt.json'
+process=None
 test_started=False
 locked=False
 for folder in [EVIDENCE, SCREENSHOTS]: folder.mkdir(parents=True,exist_ok=True)
 
 def run(args, **kwargs): return subprocess.run(args,check=True,capture_output=True,text=True,**kwargs).stdout.strip()
 def stop():
-    result=subprocess.run(['pgrep','-f',str(APP/'Contents/MacOS/WYSIWAG')],capture_output=True,text=True)
-    for pid in result.stdout.split(): subprocess.run(['kill',pid],check=False)
-    time.sleep(.4)
+    global process
+    if process is not None:
+        if process.poll() is None:
+            process.terminate()
+            try: process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait()
+        process=None
 def launch(*args):
-    run(['open',str(APP),'--args','--evidence',*args]); time.sleep(1)
-    pid=int(run(['pgrep','-f',str(APP/'Contents/MacOS/WYSIWAG')]).split()[0])
+    global process
+    process=subprocess.Popen([str(APP/'Contents/MacOS/WYSIWAG'),'--evidence',*args],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    time.sleep(1)
+    if process.poll() is not None: raise RuntimeError('Evidence app exited before Settings was ready')
+    pid=process.pid
     # Foregrounding also makes accessory-app AX windows available on some macOS versions.
     run(['osascript','-e','tell application "System Events" to tell process "WYSIWAG" to set frontmost to true'])
     return pid
@@ -82,7 +91,14 @@ def screenshot(pid,path):
     window=next(w for w in windows if w['title']=='WYSIWAG')
     run(['screencapture','-x','-o','-l',str(window['id']),str(path)])
 
+def terminate(signum, _frame):
+    raise SystemExit(128 + signum)
+
+signal.signal(signal.SIGTERM, terminate)
+
 try:
+    if subprocess.run(['pgrep','-x','WYSIWAG'],stdout=subprocess.DEVNULL).returncode==0:
+        raise RuntimeError('WYSIWAG is already running; refusing to share or stop another session')
     locked='"CGSSessionScreenIsLocked"=Yes' in run(['ioreg','-n','Root','-d1'])
     if locked: raise RuntimeError('Desktop is locked; real app UI verification requires an unlocked session')
     test_started=True
