@@ -2,12 +2,12 @@
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 
 SOURCE = Path(__file__).resolve().parent
@@ -120,41 +120,59 @@ sys.exit(int(os.environ.get('WYSIWAG_TEST_EXIT', '0')))
     def test_interrupt_cleans_up_child_and_preserves_evidence(self):
         script = self.root / 'scripts/core-e2e.sh'
         script.write_text('''#!/usr/bin/env python3
-import os, pathlib, signal, time
+import os, pathlib, signal
 out = pathlib.Path(os.environ['WYSIWAG_EVIDENCE_DIR'])
 def terminate(signum, frame):
     raise SystemExit(128 + signum)
 signal.signal(signal.SIGTERM, terminate)
 try:
     (out / 'child.pid').write_text(str(os.getpid()))
-    time.sleep(60)
+    with open(os.environ['WYSIWAG_TEST_READY'], 'w') as ready:
+        ready.write(str(os.getpid()) + '\\n')
+    signal.pause()
 finally:
     (out / 'cleaned.txt').write_text('cleaned')
 ''')
         out = self.root / 'interrupt'
-        process = subprocess.Popen([sys.executable, str(self.cli), 'evidence', 'ocr', '--out', str(out)],
+        ready_path = self.root / 'child-started'
+        os.mkfifo(ready_path)
+        ready_fd = os.open(ready_path, os.O_RDWR | os.O_NONBLOCK)
+        self.addCleanup(os.close, ready_fd)
+        launcher = '''import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+'''
+        process = subprocess.Popen([sys.executable, '-c', launcher, str(self.cli), 'evidence', 'ocr', '--out', str(out)],
+                                   env={**os.environ, 'WYSIWAG_TEST_READY': str(ready_path)},
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        child_pid = None
+        child_reaped = False
         try:
-            deadline = time.monotonic() + 5
-            while not (out / 'child.pid').exists() and time.monotonic() < deadline:
-                time.sleep(0.01)
-            self.assertTrue((out / 'child.pid').exists())
+            readable, _, _ = select.select([ready_fd], [], [], 15)
+            self.assertTrue(readable, 'Synthetic child did not announce readiness')
+            child_pid = int(os.read(ready_fd, 128))
             process.send_signal(signal.SIGINT)
             stdout, stderr = process.communicate(timeout=15)
             self.assertEqual(process.returncode, 130, stdout + stderr)
             self.assertEqual((out / 'cleaned.txt').read_text(), 'cleaned')
             self.assertEqual(json.loads((out / 'run.json').read_text())['exit_code'], 130)
             with self.assertRaises(ProcessLookupError):
-                os.kill(int((out / 'child.pid').read_text()), 0)
+                os.kill(child_pid, 0)
+            child_reaped = True
         finally:
             if process.poll() is None:
                 process.kill()
-                process.communicate()
-            if (out / 'child.pid').exists():
-                try:
-                    os.kill(int((out / 'child.pid').read_text()), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+            if not child_reaped:
+                if child_pid is None and (out / 'child.pid').exists():
+                    pid_text = (out / 'child.pid').read_text().strip()
+                    if pid_text.isdecimal():
+                        child_pid = int(pid_text)
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+            process.communicate(timeout=5)
 
     def test_filter_is_forwarded_to_swift_test(self):
         bin_dir = self.root / 'bin'
