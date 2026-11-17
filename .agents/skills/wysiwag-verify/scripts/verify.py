@@ -88,11 +88,17 @@ def run_command(argv, env, log):
     try:
         code = child.wait()
     except KeyboardInterrupt:
-        os.killpg(child.pid, signal.SIGTERM)
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         try:
             child.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             child.wait()
         return 130
     return code if code >= 0 else 128 - code

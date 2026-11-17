@@ -174,6 +174,29 @@ os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
                         pass
             process.communicate(timeout=5)
 
+    def test_interrupt_after_child_completion_preserves_evidence(self):
+        launcher = '''import runpy, subprocess, sys
+original_wait = subprocess.Popen.wait
+def wait_then_interrupt(child, timeout=None):
+    original_wait(child, timeout=timeout)
+    subprocess.Popen.wait = original_wait
+    raise KeyboardInterrupt
+subprocess.Popen.wait = wait_then_interrupt
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+'''
+        out = self.root / 'completed-child'
+        result = subprocess.run([sys.executable, '-c', launcher, str(self.cli),
+                                 'evidence', 'ocr', '--out', str(out)],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 130, result.stdout + result.stderr)
+        report = json.loads((out / 'run.json').read_text())
+        self.assertEqual(report['status'], 'failed')
+        self.assertEqual(report['exit_code'], 130)
+        self.assertEqual(report['commands'][0]['exit_code'], 130)
+        self.assertEqual((out / 'fixture.txt').read_text(), 'fixture evidence\n')
+        self.assertIn('existing script received', (out / 'check.log').read_text())
+
     def test_filter_is_forwarded_to_swift_test(self):
         bin_dir = self.root / 'bin'
         bin_dir.mkdir()
